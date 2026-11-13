@@ -149,7 +149,7 @@ async def run_basic_eval(db: Session | None = None, repo_id: str | None = None) 
         "ci-debug": "ci_debug_agent.analyze_workflow_run",
         "weekly-report": "report_agent.generate_weekly_report",
         "safety-draft": "safety_agent.classify_action_risk",
-        "project-investigation": "devflow_search_evidence",
+        "project-investigation": "devcooper_search_evidence",
     }
     loaded_skill_names = {skill.manifest.name for skill in registry.list_skills()}
     skill_registry_coverage = len(loaded_skill_names & set(required_skill_entrypoints)) / len(required_skill_entrypoints)

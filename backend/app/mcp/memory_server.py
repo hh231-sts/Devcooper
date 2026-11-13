@@ -20,7 +20,7 @@ from app.services.chat_memory import MemoryTools  # noqa: E402
 from app.services.conversations import ensure_conversation  # noqa: E402
 
 
-SERVER_NAME = "devflow-memory-mcp"
+SERVER_NAME = "devcooper-memory-mcp"
 SERVER_VERSION = "0.1.0"
 
 for stream in (sys.stdin, sys.stdout, sys.stderr):
@@ -39,9 +39,9 @@ def _json_schema(properties: dict[str, Any], required: list[str] | None = None) 
 
 TOOLS: list[dict[str, Any]] = [
     {
-        "name": "devflow_search_evidence",
+        "name": "devcooper_search_evidence",
         "description": (
-            "搜索 DevFlow 仓库知识和持久记忆。"
+            "搜索 Devcooper 仓库知识和持久记忆。"
             "当需要回忆历史 Issue/PR、失败 CI、上传知识、项目文档、会话摘要、Agent 运行记录或已批准决策时，优先使用这个工具。"
             "当前代码、团队成员和实时状态应使用工作区或结构化工具。"
         ),
@@ -50,15 +50,15 @@ TOOLS: list[dict[str, Any]] = [
                 "query": {"type": "string", "description": "搜索查询"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 20, "description": "最大结果数"},
                 "repo_id": {"type": "string", "description": "必填仓库 UUID。"},
-                "conversation_id": {"type": "string", "description": "可选 DevFlow 会话 UUID。"},
+                "conversation_id": {"type": "string", "description": "可选 Devcooper 会话 UUID。"},
             },
             ["query", "repo_id"],
         ),
     },
     {
-        "name": "devflow_get_thread_context",
+        "name": "devcooper_get_thread_context",
         "description": (
-            "读取 DevFlow 仓库会话的完整原始聊天转录，可跨越 Compact Boundary。"
+            "读取 Devcooper 仓库会话的完整原始聊天转录，可跨越 Compact Boundary。"
             "支持关键词、消息 UUID、前后范围和字符偏移分页；当用户询问之前说过什么或需要逐字核实时使用。"
         ),
         "inputSchema": _json_schema(
@@ -71,15 +71,15 @@ TOOLS: list[dict[str, Any]] = [
                 "offset": {"type": "integer", "minimum": 0, "description": "读取单条消息时的字符偏移量。"},
                 "max_chars": {"type": "integer", "minimum": 200, "maximum": 16000, "description": "本次最多返回的正文字符数。"},
                 "repo_id": {"type": "string", "description": "必填仓库 UUID。"},
-                "conversation_id": {"type": "string", "description": "可选 DevFlow 会话 UUID。"},
+                "conversation_id": {"type": "string", "description": "可选 Devcooper 会话 UUID。"},
             },
             ["repo_id"],
         ),
     },
     {
-        "name": "devflow_read_session_events",
+        "name": "devcooper_read_session_events",
         "description": (
-            "读取已封存的 DevFlow 聊天会话、摘要、原始消息和工具事件。"
+            "读取已封存的 Devcooper 聊天会话、摘要、原始消息和工具事件。"
             "在 search_evidence 之后，或需要会话级回忆时使用。"
         ),
         "inputSchema": _json_schema(
@@ -89,7 +89,7 @@ TOOLS: list[dict[str, Any]] = [
                 "include_transcript": {"type": "boolean", "description": "是否返回封存的原始消息和工具事件，默认 true。"},
                 "max_chars": {"type": "integer", "minimum": 400, "maximum": 20000, "description": "本次最多返回的正文字符数。"},
                 "repo_id": {"type": "string", "description": "必填仓库 UUID。"},
-                "conversation_id": {"type": "string", "description": "可选 DevFlow 会话 UUID。"},
+                "conversation_id": {"type": "string", "description": "可选 Devcooper 会话 UUID。"},
             },
             ["repo_id"],
         ),
@@ -143,7 +143,7 @@ async def _call_memory_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         conversation = _resolve_conversation(db, repo, args)
         tools = MemoryTools(db, repo, conversation)
 
-        if name == "devflow_search_evidence":
+        if name == "devcooper_search_evidence":
             query = str(args.get("query") or "").strip()
             if not query:
                 raise McpError(-32602, "query 为必填项")
@@ -151,7 +151,7 @@ async def _call_memory_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             db.commit()
             return _content(f"仓库：{_repo_label(repo)}\n会话：{conversation.title if conversation else '全局'}\n\n{result.get('answer') or ''}")
 
-        if name == "devflow_get_thread_context":
+        if name == "devcooper_get_thread_context":
             result = await tools.get_thread_context(
                 {
                     "keyword": str(args.get("keyword") or ""),
@@ -167,7 +167,7 @@ async def _call_memory_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             db.commit()
             return _content(f"仓库：{_repo_label(repo)}\n会话：{conversation.title if conversation else '全局'}\n\n{result.get('answer') or ''}")
 
-        if name == "devflow_read_session_events":
+        if name == "devcooper_read_session_events":
             result = await tools.read_session_events(
                 {
                     "session_id": args.get("session_id"),

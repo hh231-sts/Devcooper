@@ -964,16 +964,16 @@ def _build_conversation_tools(repo: Repository | None, conversation: Conversatio
             arguments["repo_id"] = str(repo.id)
         if conversation:
             arguments["conversation_id"] = str(conversation.id)
-        if tool_name == "devflow_search_evidence":
+        if tool_name == "devcooper_search_evidence":
             arguments.setdefault("query", input_data.get("message") or "")
         if context.get("evaluation_mode"):
             # The stdio server opens the production database. Run its same
             # handlers locally so evaluation writes stay in the trial database.
             memory = MemoryTools(db, repo, conversation)
             handler = {
-                "devflow_search_evidence": memory.search_evidence,
-                "devflow_get_thread_context": memory.get_thread_context,
-                "devflow_read_session_events": memory.read_session_events,
+                "devcooper_search_evidence": memory.search_evidence,
+                "devcooper_get_thread_context": memory.get_thread_context,
+                "devcooper_read_session_events": memory.read_session_events,
             }[tool_name]
             local = await handler(arguments, context)
             label = repo.full_name if repo else "全局"
@@ -987,20 +987,20 @@ def _build_conversation_tools(repo: Repository | None, conversation: Conversatio
             if isinstance(item, dict) and item.get("type") == "text"
         ]
         return {
-            "route": tool_name.replace("devflow_", ""),
+            "route": tool_name.replace("devcooper_", ""),
             "tool_calls": [{"tool_name": tool_name, "arguments": arguments, "status": "success"}],
             "answer": "\n".join(text_parts).strip(),
             "citations": [],
         }
 
     async def search_evidence_mcp(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        return await call_memory_mcp("devflow_search_evidence", input_data, context)
+        return await call_memory_mcp("devcooper_search_evidence", input_data, context)
 
     async def get_thread_context_mcp(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        return await call_memory_mcp("devflow_get_thread_context", input_data, context)
+        return await call_memory_mcp("devcooper_get_thread_context", input_data, context)
 
     async def read_session_events_mcp(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        return await call_memory_mcp("devflow_read_session_events", input_data, context)
+        return await call_memory_mcp("devcooper_read_session_events", input_data, context)
 
     async def list_workspace_files(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         workspace_root = _workspace_root(repo)
@@ -1338,9 +1338,9 @@ def _build_conversation_tools(repo: Repository | None, conversation: Conversatio
         "report_agent.generate_weekly_report": generate_report,
         "safety_agent.classify_action_risk": check_safety,
         "workflow.run_engineering_review": run_engineering_workflow,
-        "devflow_search_evidence": search_evidence_mcp,
-        "devflow_get_thread_context": get_thread_context_mcp,
-        "devflow_read_session_events": read_session_events_mcp,
+        "devcooper_search_evidence": search_evidence_mcp,
+        "devcooper_get_thread_context": get_thread_context_mcp,
+        "devcooper_read_session_events": read_session_events_mcp,
     }
 
 

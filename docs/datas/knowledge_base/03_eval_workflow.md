@@ -1,4 +1,4 @@
-# DevFlow AI 的固定评测、后台任务与质量判定
+# Devcooper 的固定评测、后台任务与质量判定
 
 固定评测从 `docs/datas/evals/*.json` 读取用例。`load_eval_suite` 会将每题的 `source_file` 文件名映射到当前仓库已经入库的 Document；没有入库的来源会使评测集的 `ready` 为 false，加载时列出缺失来源并拒绝运行。
 

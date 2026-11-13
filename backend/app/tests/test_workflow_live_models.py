@@ -14,7 +14,7 @@ from app.services.llm.client import LLMClient
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(
-    os.environ.get("DEVFLOW_RUN_LIVE_LLM") != "1" or not settings.llm_api_key,
+    os.environ.get("DEVCOOPER_RUN_LIVE_LLM") != "1" or not settings.llm_api_key,
     reason="Requires explicit live-model opt-in and LLM_API_KEY; real requests incur provider charges.",
 )]
 

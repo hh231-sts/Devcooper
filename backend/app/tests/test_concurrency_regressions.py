@@ -34,9 +34,9 @@ def database(request, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "llm_api_key", None)
     schema = None
     if request.param == "postgresql":
-        url = os.getenv("DEVFLOW_TEST_POSTGRES_URL")
+        url = os.getenv("DEVCOOPER_TEST_POSTGRES_URL")
         if not url:
-            pytest.skip("Set DEVFLOW_TEST_POSTGRES_URL to run real PostgreSQL lock regressions")
+            pytest.skip("Set DEVCOOPER_TEST_POSTGRES_URL to run real PostgreSQL lock regressions")
         schema = "concurrency_" + uuid.uuid4().hex
         engine = create_engine(url, connect_args={"application_name": schema, "connect_timeout": 3}, execution_options={"schema_translate_map": {None: schema}})
         with engine.begin() as connection:
@@ -101,9 +101,9 @@ async def test_eval_and_normal_chat_complete_without_mutating_shared_evidence(da
         async def run(self, payload, context):
             # Exercise a real tool that flushes RecallEvent while the trial runs.
             await context["tools"]["rag.search_similar_documents"]({"query": "idempotency"}, context)
-            await context["tools"]["devflow_search_evidence"]({"query": "idempotency"}, context)
-            await context["tools"]["devflow_get_thread_context"]({}, context)
-            await context["tools"]["devflow_read_session_events"]({}, context)
+            await context["tools"]["devcooper_search_evidence"]({"query": "idempotency"}, context)
+            await context["tools"]["devcooper_get_thread_context"]({}, context)
+            await context["tools"]["devcooper_read_session_events"]({}, context)
             entered.set()
             await finish.wait()
             return {"answer": "Use an idempotency key", "tool_calls": [], "citations": []}

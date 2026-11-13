@@ -19,7 +19,7 @@ def _db_session():
 
 
 def _feedback_fixture(db):
-    repo = Repository(owner="devflow", name="demo", full_name=f"devflow/demo-{uuid.uuid4().hex[:8]}")
+    repo = Repository(owner="devcooper", name="demo", full_name=f"devcooper/demo-{uuid.uuid4().hex[:8]}")
     db.add(repo)
     db.flush()
     conversation = Conversation(repo_id=repo.id, title="反馈测试")

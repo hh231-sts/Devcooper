@@ -1,4 +1,4 @@
-# DevFlow AI API
+# Devcooper API
 
 启动后端后访问 `http://localhost:8000/docs` 查看交互式 OpenAPI。
 

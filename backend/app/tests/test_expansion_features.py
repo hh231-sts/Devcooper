@@ -326,7 +326,7 @@ def test_cleanup_pr_snapshots_removes_old_dirs_and_code_graph(tmp_path, monkeypa
     repo = _repo(db)
     snapshot_dir = checkout_root / "worktrees" / str(repo.id) / "pr-1-local__demo"
     snapshot_dir.mkdir(parents=True)
-    (snapshot_dir / ".devflow-pr-snapshot.json").write_text(
+    (snapshot_dir / ".devcooper-pr-snapshot.json").write_text(
         '{"updated_at": "'
         + (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         + '", "pr_id": "00000000-0000-0000-0000-000000000123"}',

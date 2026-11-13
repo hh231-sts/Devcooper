@@ -4,12 +4,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_env: str = "development"
-    app_name: str = "DevFlow AI"
+    app_name: str = "Devcooper"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
 
-    database_url: str = "postgresql+psycopg://devflow:devflow@localhost:5432/devflow"
+    database_url: str = "postgresql+psycopg://devcooper:devcooper@localhost:5432/devcooper"
 
     github_token: str | None = None
     github_api_base_url: str = "https://api.github.com"
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     milvus_enabled: bool = True
     milvus_uri: str = "http://localhost:19530"
     milvus_token: str | None = None
-    milvus_collection: str = "devflow_rag_qwen1024"
+    milvus_collection: str = "devcooper_rag_qwen1024"
     rag_rerank_top_n: int = 24
     ragas_enabled: bool = True
     ragas_judge_api_key: str | None = None
@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     workflow_synthesis_model_enabled: bool = False
     workflow_replan_model_enabled: bool = False
     prompt_cache_enabled: bool = True
-    prompt_cache_key: str | None = "devflow-agent-v1"
+    prompt_cache_key: str | None = "devcooper-agent-v1"
     prompt_cache_retention: str | None = None
     repo_checkout_dir: str = ".data/repos"
     upload_dir: str = ".data/uploads"

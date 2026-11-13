@@ -4,15 +4,15 @@ title: 项目证据调查
 version: 0.1.0
 description: 联合当前工作区、项目 RAG 和会话记忆回答实现与历史决策问题。
 category: project-analysis
-entrypoint: devflow_search_evidence
+entrypoint: devcooper_search_evidence
 tools:
   - workspace.list_files
   - workspace.search_code
   - workspace.read_file
   - rag.search_similar_documents
-  - devflow_search_evidence
-  - devflow_get_thread_context
-  - devflow_read_session_events
+  - devcooper_search_evidence
+  - devcooper_get_thread_context
+  - devcooper_read_session_events
 input_modes:
   - current_implementation
   - historical_decision
@@ -47,8 +47,8 @@ safety_level: read_only
 
 1. 先判断问题是在问当前源码、项目历史，还是当前会话。
 2. 当前源码使用 `workspace.search_code`，命中后用 `workspace.read_file` 阅读上下文。
-3. 历史 Issue、PR、CI、项目知识和已批准记忆使用 `devflow_search_evidence`。
-4. 用户追问原始对话时使用 `devflow_get_thread_context`；需要封存摘要时使用 `devflow_read_session_events`。
+3. 历史 Issue、PR、CI、项目知识和已批准记忆使用 `devcooper_search_evidence`。
+4. 用户追问原始对话时使用 `devcooper_get_thread_context`；需要封存摘要时使用 `devcooper_read_session_events`。
 5. 回答时区分证据、推断和未知项，并保留可验证引用。
 
 ## 边界

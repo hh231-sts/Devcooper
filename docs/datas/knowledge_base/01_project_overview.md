@@ -1,6 +1,6 @@
-# DevFlow AI 的项目定位与专用 Agent
+# Devcooper 的项目定位与专用 Agent
 
-DevFlow AI 是面向 GitHub 研发协作的全栈 AI Agent 项目，后端使用 FastAPI，前端使用 Next.js。它把仓库事实、项目知识和受限工具提供给 Agent，输出分析建议和需要人工确认的操作草稿。
+Devcooper 是面向 GitHub 研发协作的全栈 AI Agent 项目，后端使用 FastAPI，前端使用 Next.js。它把仓库事实、项目知识和受限工具提供给 Agent，输出分析建议和需要人工确认的操作草稿。
 
 项目中的三类专用分析 Agent 分别分析 Issue、PR、CI。Issue 分析关注问题分类、优先级、复杂度和行动项；PR 分析关注代码变更、风险与测试建议；CI 分析关注失败日志、可能原因和排查步骤。
 

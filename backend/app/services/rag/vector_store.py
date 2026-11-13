@@ -41,7 +41,7 @@ def _as_uuid(value: uuid.UUID | str | None) -> uuid.UUID:
 
 
 def stable_source_id(repo_id: uuid.UUID | str, source_type: str, key: str) -> uuid.UUID:
-    return uuid.uuid5(uuid.NAMESPACE_URL, f"devflow:{repo_id}:{source_type}:{key}")
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"devcooper:{repo_id}:{source_type}:{key}")
 
 
 def _escape_filter_value(value: str) -> str:

@@ -20,7 +20,7 @@ def _busy() -> HTTPException:
 
 
 def _advisory_key(repo_id: UUID) -> int:
-    return int.from_bytes(hashlib.blake2b(b"devflow:repo-sync:" + repo_id.bytes, digest_size=8).digest(), "big", signed=True)
+    return int.from_bytes(hashlib.blake2b(b"devcooper:repo-sync:" + repo_id.bytes, digest_size=8).digest(), "big", signed=True)
 
 
 def _acquire_database_lock(engine: Engine, repo_id: UUID) -> Connection:

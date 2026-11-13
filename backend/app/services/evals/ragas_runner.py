@@ -151,7 +151,7 @@ def _ensure_ragas_compatibility() -> None:
 
 
 class RagasCollectionsScorer:
-    """Adapter from DevFlow's model clients to the Ragas 0.4 Collections API."""
+    """Adapter from Devcooper's model clients to the Ragas 0.4 Collections API."""
 
     def __init__(self) -> None:
         _ensure_ragas_compatibility()

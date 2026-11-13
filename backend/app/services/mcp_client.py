@@ -47,7 +47,7 @@ class StdioMcpClient:
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "devflow-web-agent", "version": "0.1.0"},
+                "clientInfo": {"name": "devcooper-web-agent", "version": "0.1.0"},
             },
         )
 

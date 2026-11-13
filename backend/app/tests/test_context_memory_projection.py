@@ -148,7 +148,7 @@ async def test_exact_thread_recall_reads_pre_boundary_text_and_is_audited() -> N
     assert "UNIQUE-PRE-BOUNDARY original wording" in result["answer"]
     assert str(old.id) in result["answer"]
     assert old.content[7:19] in page["answer"]
-    events = db.query(RecallEvent).filter(RecallEvent.tool_name == "devflow_get_thread_context").all()
+    events = db.query(RecallEvent).filter(RecallEvent.tool_name == "devcooper_get_thread_context").all()
     assert len(events) == 2
     assert all(event.mode == "exact_transcript" for event in events)
 
@@ -180,7 +180,7 @@ async def test_session_event_tool_returns_transcript_and_records_recall() -> Non
 
     assert "exact sealed text" in result["answer"]
     assert continuation["results"][0]["metadata"]["offset"] == 5
-    events = db.query(RecallEvent).filter(RecallEvent.tool_name == "devflow_read_session_events").all()
+    events = db.query(RecallEvent).filter(RecallEvent.tool_name == "devcooper_read_session_events").all()
     assert len(events) == 2
     assert all(event.mode == "sealed_transcript" for event in events)
     assert all(event.result_count == 1 for event in events)

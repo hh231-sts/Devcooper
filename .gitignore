@@ -30,7 +30,7 @@ tmp/
 .tmp/
 .codex_tmp/
 .data/
-.devflow/
+.devcooper/
 *.db
 *.sqlite
 *.sqlite3
@@ -38,8 +38,8 @@ tmp/
 *.sqlite3-wal
 *.log
 backend/.data/
-backend/devflow_demo.db
-devflow_demo.db
+backend/devcooper_demo.db
+devcooper_demo.db
 
 # Personal documents and local deliverables
 output/

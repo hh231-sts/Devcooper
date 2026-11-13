@@ -18,7 +18,7 @@ def _db_session():
 
 
 def _write_allowlist_config(project) -> None:
-    config_dir = project / ".devflow"
+    config_dir = project / ".devcooper"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "index.yml").write_text(
         """version: 1

@@ -7,7 +7,7 @@ category: safety
 entrypoint: safety_agent.classify_action_risk
 tools:
   - safety_agent.classify_action_risk
-  - devflow_search_evidence
+  - devcooper_search_evidence
 input_modes:
   - write_intent_from_chat
   - external_send_intent

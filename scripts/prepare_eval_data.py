@@ -15,7 +15,7 @@ from uuid import UUID
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SUITE_PATH = PROJECT_ROOT / "docs" / "datas" / "evals" / "rag_cases.json"
 KNOWLEDGE_DIR = PROJECT_ROOT / "docs" / "datas" / "knowledge_base"
-DEMO_FULL_NAME = "course-demo/devflow-eval-course"
+DEMO_FULL_NAME = "course-demo/devcooper-eval-course"
 
 
 def load_dataset(suite_path: Path = SUITE_PATH, knowledge_dir: Path = KNOWLEDGE_DIR) -> dict:
@@ -65,7 +65,7 @@ def prepare_dataset(client, dataset: dict, *, repo_id: str | None, demo_repo: bo
             repo_id = str(existing["id"])
         else:
             created = response_json(client.post("/api/repos/connect", json={
-                "owner": "course-demo", "repo": "devflow-eval-course", "demo_mode": True,
+                "owner": "course-demo", "repo": "devcooper-eval-course", "demo_mode": True,
             }))
             repo_id = str(created["repo_id"])
     if not repo_id:

@@ -9,13 +9,13 @@ def main() -> None:
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        repo = db.query(Repository).filter(Repository.full_name == "course-demo/devflow-sample-api").one_or_none()
+        repo = db.query(Repository).filter(Repository.full_name == "course-demo/devcooper-sample-api").one_or_none()
         if repo is None:
             repo = Repository(
                 owner="course-demo",
-                name="devflow-sample-api",
-                full_name="course-demo/devflow-sample-api",
-                description="Demo repository for DevFlow AI course",
+                name="devcooper-sample-api",
+                full_name="course-demo/devcooper-sample-api",
+                description="Demo repository for Devcooper course",
                 default_branch="main",
                 github_id=10001,
             )
@@ -54,7 +54,7 @@ def main() -> None:
                     name="backend-test",
                     status="completed",
                     conclusion="failure",
-                    html_url="https://github.com/course-demo/devflow-sample-api/actions/runs/301",
+                    html_url="https://github.com/course-demo/devcooper-sample-api/actions/runs/301",
                     jobs=[
                         {
                             "id": 9001,
@@ -67,7 +67,7 @@ def main() -> None:
                     logs_text="pytest backend/app/tests/test_github_sync.py::test_sync_issues FAILED AssertionError: expected 3 issues, got 2",
                     created_at=datetime.now(timezone.utc),
                 ),
-                WorkflowRun(repo_id=repo.id, github_run_id=302, name="frontend-lint", status="completed", conclusion="success", html_url="https://github.com/course-demo/devflow-sample-api/actions/runs/302", logs_text="", created_at=datetime.now(timezone.utc))
+                WorkflowRun(repo_id=repo.id, github_run_id=302, name="frontend-lint", status="completed", conclusion="success", html_url="https://github.com/course-demo/devcooper-sample-api/actions/runs/302", logs_text="", created_at=datetime.now(timezone.utc))
             ])
 
         db.flush()

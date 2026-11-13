@@ -507,7 +507,7 @@ def _node_key(node_type: str, node_id: str) -> str:
 
 
 def _edge_id(from_type: str, from_id: str, to_type: str, to_id: str, relation: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"devflow-graph:{from_type}:{from_id}:{relation}:{to_type}:{to_id}"))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"devcooper-graph:{from_type}:{from_id}:{relation}:{to_type}:{to_id}"))
 
 
 def _path_node_id(path: str) -> str:

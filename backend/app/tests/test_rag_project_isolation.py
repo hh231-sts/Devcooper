@@ -57,7 +57,7 @@ def test_chat_agent_overwrites_model_supplied_mcp_scope() -> None:
     repo_id = str(uuid.uuid4())
     conversation_id = str(uuid.uuid4())
     normalized = ChatAgent(model=object())._normalize_action_input(  # type: ignore[arg-type]
-        "devflow_search_evidence",
+        "devcooper_search_evidence",
         {
             "query": "token failure",
             "repo_id": str(uuid.uuid4()),

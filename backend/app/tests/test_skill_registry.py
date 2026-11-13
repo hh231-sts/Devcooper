@@ -68,7 +68,7 @@ def test_skill_registry_loads_builtin_skills() -> None:
         "project-investigation",
     } <= names
     assert registry.skill_for_entrypoint("pr_review_agent.analyze_pr").manifest.name == "pr-review"
-    assert registry.skill_for_entrypoint("devflow_search_evidence").manifest.name == "project-investigation"
+    assert registry.skill_for_entrypoint("devcooper_search_evidence").manifest.name == "project-investigation"
     assert registry.get_skill("ci-debug").manifest.workflow_steps[0] == "collect_failed_jobs_and_logs"
     assert "ci-debug" in registry.prompt_context()
 
@@ -174,12 +174,12 @@ def test_skill_registry_annotates_entrypoint_tool_calls() -> None:
 async def test_stdio_mcp_client_inspects_real_server_and_tools() -> None:
     inspection = await StdioMcpClient().inspect_server()
 
-    assert inspection["initialize"]["serverInfo"] == {"name": "devflow-memory-mcp", "version": "0.1.0"}
+    assert inspection["initialize"]["serverInfo"] == {"name": "devcooper-memory-mcp", "version": "0.1.0"}
     assert inspection["initialize"]["protocolVersion"] == "2024-11-05"
     assert {tool["name"] for tool in inspection["tools"]} == {
-        "devflow_search_evidence",
-        "devflow_get_thread_context",
-        "devflow_read_session_events",
+        "devcooper_search_evidence",
+        "devcooper_get_thread_context",
+        "devcooper_read_session_events",
     }
 
 
@@ -199,9 +199,9 @@ async def test_chat_agent_executes_explicit_memory_tool_before_model_answer() ->
     events = [
         event
         async for event in ChatAgent(model=model).run_stream(  # type: ignore[arg-type]
-            {"message": "请先调用 devflow_search_evidence 搜索历史证据"},
+            {"message": "请先调用 devcooper_search_evidence 搜索历史证据"},
             {
-                "tools": {"devflow_search_evidence": evidence_tool},
+                "tools": {"devcooper_search_evidence": evidence_tool},
                 "skill_trace_by_tool": registry.trace_metadata_by_tool(),
                 "skill_description_by_tool": registry.tool_description_suffixes(),
             },
@@ -212,7 +212,7 @@ async def test_chat_agent_executes_explicit_memory_tool_before_model_answer() ->
     tool_result = next(event for event in events if event["event"] == "tool_result")
     final = events[-1]["data"]
     assert model.calls == 1
-    assert tool_use["data"]["tool_name"] == "devflow_search_evidence"
+    assert tool_use["data"]["tool_name"] == "devcooper_search_evidence"
     assert tool_result["data"]["skill_name"] == "project-investigation"
     assert final["tool_calls"][0]["skill_version"] == "0.1.0"
 

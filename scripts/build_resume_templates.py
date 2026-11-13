@@ -26,7 +26,7 @@ PLACEHOLDER = RGBColor(110, 79, 0)
 
 TEMPLATES = [
     {
-        "filename": "DevFlow_AI_简历模板_校招_AI应用开发.docx",
+        "filename": "Devcooper__简历模板_校招_AI应用开发.docx",
         "name": "【姓名】",
         "contact": "【手机号】 | 【邮箱】 | GitHub: 【链接】 | 【所在城市】",
         "headline": "应届生 | AI 应用开发工程师 | 【本科/硕士 · 毕业年份】",
@@ -72,7 +72,7 @@ TEMPLATES = [
                 "blocks": [
                     {
                         "type": "row",
-                        "left": "DevFlow AI：GitHub 研发协作 Agent",
+                        "left": "Devcooper：GitHub 研发协作 Agent",
                         "middle": "AI 应用开发",
                         "right": "【起止时间】",
                     },
@@ -103,7 +103,7 @@ TEMPLATES = [
         ],
     },
     {
-        "filename": "DevFlow_AI_简历模板_社招_AI应用工程.docx",
+        "filename": "Devcooper__简历模板_社招_AI应用工程.docx",
         "name": "【姓名】",
         "contact": "【手机号】 | 【邮箱】 | GitHub: 【链接】 | 【所在城市】",
         "headline": "【X 年经验】 | AI 应用开发工程师 | 【最高学历 · 毕业年份】",
@@ -137,7 +137,7 @@ TEMPLATES = [
                 "blocks": [
                     {
                         "type": "row",
-                        "left": "DevFlow AI：研发协作 Agent 平台",
+                        "left": "Devcooper：研发协作 Agent 平台",
                         "middle": "核心开发 / 架构设计",
                         "right": "【起止时间】",
                     },
@@ -176,7 +176,7 @@ TEMPLATES = [
         ],
     },
     {
-        "filename": "DevFlow_AI_简历模板_社招_后端Agent平台.docx",
+        "filename": "Devcooper__简历模板_社招_后端Agent平台.docx",
         "name": "【姓名】",
         "contact": "【手机号】 | 【邮箱】 | GitHub: 【链接】 | 【所在城市】",
         "headline": "【X 年经验】 | Python 后端 / Agent 平台工程师 | 【最高学历 · 毕业年份】",
@@ -211,7 +211,7 @@ TEMPLATES = [
                 "blocks": [
                     {
                         "type": "row",
-                        "left": "DevFlow AI：全栈研发协作平台",
+                        "left": "Devcooper：全栈研发协作平台",
                         "middle": "后端 / Agent 平台开发",
                         "right": "【起止时间】",
                     },
@@ -495,10 +495,10 @@ def build_template(template: dict) -> Path:
 
     properties = document.core_properties
     properties.title = template["filename"].removesuffix(".docx")
-    properties.subject = "DevFlow AI 项目简历模板"
+    properties.subject = "Devcooper 项目简历模板"
     properties.author = ""
     properties.last_modified_by = ""
-    properties.keywords = "DevFlow AI, AI Agent, RAG, Resume"
+    properties.keywords = "Devcooper, AI Agent, RAG, Resume"
 
     output = OUTPUT_DIR / template["filename"]
     document.save(output)
@@ -513,7 +513,7 @@ def validate_output(output: Path, template: dict) -> None:
     missing = [title for title in expected_sections if title not in text]
     if missing:
         raise AssertionError(f"Missing sections in {output.name}: {missing}")
-    if "DevFlow AI" not in text or "【" not in text:
+    if "Devcooper" not in text or "【" not in text:
         raise AssertionError(f"Missing project copy or placeholders in {output.name}")
     if document.tables:
         raise AssertionError(f"Resume uses layout tables: {output.name}")

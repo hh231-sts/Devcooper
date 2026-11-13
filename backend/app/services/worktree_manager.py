@@ -56,7 +56,7 @@ def pr_worktree_path(repo: Repository, pr: PullRequest) -> Path:
 
 
 def _snapshot_meta_path(path: Path) -> Path:
-    return path / ".devflow-pr-snapshot.json"
+    return path / ".devcooper-pr-snapshot.json"
 
 
 def _write_snapshot_meta(path: Path, meta: dict[str, Any]) -> None:
@@ -126,7 +126,7 @@ def prepare_pr_worktree(db: Session, repo: Repository, pr: PullRequest) -> dict[
             base_checkout = _sync_checkout(repo, token)
             target.parent.mkdir(parents=True, exist_ok=True)
             ref = pr.head_branch
-            local_branch = f"devflow/pr-{pr.number}"
+            local_branch = f"devcooper/pr-{pr.number}"
             _run_git(["fetch", "origin", ref], cwd=base_checkout)
             if target.exists():
                 _run_git(["fetch", "origin", ref], cwd=target)

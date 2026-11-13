@@ -279,7 +279,7 @@ class MessageStore:
                 if call_id:
                     native_result_ids.add(str(call_id))
                 meta.setdefault("recovery", {
-                    "tool": "devflow_get_thread_context", "message_id": str(row.id),
+                    "tool": "devcooper_get_thread_context", "message_id": str(row.id),
                 })
             if row.role == "assistant" and meta.get("subtype") != "tool_result":
                 session = sessions.get(row.id)
@@ -305,7 +305,7 @@ class MessageStore:
                     event_meta = event.get("meta") or event.get("metadata") or {}
                     event_meta = event_meta if isinstance(event_meta, dict) else {}
                     recovery = (
-                        {"tool": "devflow_read_session_events", "session_id": str(session.id), "include_transcript": True}
+                        {"tool": "devcooper_read_session_events", "session_id": str(session.id), "include_transcript": True}
                         if session else {"tool": tool_name, "arguments": arguments}
                     )
                     projected.append({
@@ -621,7 +621,7 @@ class ContextAssembler:
                 transcript_ref = (boundary.meta or {}).get("transcript_ref") or {}
                 rehydration = (boundary.meta or {}).get("rehydration") or {}
                 recovery_hint = (
-                    "\nExact transcript recovery: call devflow_get_thread_context with this conversation"
+                    "\nExact transcript recovery: call devcooper_get_thread_context with this conversation"
                     if transcript_ref
                     else ""
                 )
@@ -1017,7 +1017,7 @@ class ProgressiveContextManager:
                 "transcript_ref": {
                     "repo_id": str(repo.id),
                     "conversation_id": str(conversation.id),
-                    "tool": "devflow_get_thread_context",
+                    "tool": "devcooper_get_thread_context",
                 },
                 "messages_summarized": len(summarized_rows),
                 "messages_preserved": len(keep_rows),
@@ -1086,8 +1086,8 @@ class ProgressiveContextManager:
             "active_skills": active_skills,
             "recent_tools": recent_tools,
             "recovery": {
-                "exact_transcript_tool": "devflow_get_thread_context",
-                "sealed_session_tool": "devflow_read_session_events",
+                "exact_transcript_tool": "devcooper_get_thread_context",
+                "sealed_session_tool": "devcooper_read_session_events",
             },
         }
 
@@ -1409,7 +1409,7 @@ class MemoryTools:
             self.db,
             repo_id=self.repo_id,
             conversation_id=self.conversation_id,
-            tool_name="devflow_search_evidence",
+            tool_name="devcooper_search_evidence",
             query=query,
             results=results,
             citations=citations,
@@ -1508,7 +1508,7 @@ class MemoryTools:
             self.db,
             repo_id=self.repo_id,
             conversation_id=self.conversation_id,
-            tool_name="devflow_get_thread_context",
+            tool_name="devcooper_get_thread_context",
             query=keyword or str(message_id or ""),
             results=results,
             citations=citations,
@@ -1593,7 +1593,7 @@ class MemoryTools:
             self.db,
             repo_id=self.repo_id,
             conversation_id=self.conversation_id,
-            tool_name="devflow_read_session_events",
+            tool_name="devcooper_read_session_events",
             query=str(session_id or "latest sessions"),
             results=results,
             citations=citations,

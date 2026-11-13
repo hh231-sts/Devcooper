@@ -257,7 +257,7 @@ async def test_recent_recall_uses_injected_history_without_memory_tool() -> None
         {"message": "我刚刚说了什么？"},
         {
             **_history_context(complete_and_exact=True),
-            "tools": {"devflow_get_thread_context": get_thread_context},
+            "tools": {"devcooper_get_thread_context": get_thread_context},
         },
     )
 
@@ -283,7 +283,7 @@ async def test_recent_recall_fetches_thread_context_when_prompt_history_is_incom
         return {
             "route": "thread_context",
             "tool_calls": [
-                {"tool_name": "devflow_get_thread_context", "arguments": input_data, "status": "success"}
+                {"tool_name": "devcooper_get_thread_context", "arguments": input_data, "status": "success"}
             ],
             "answer": "user: hi",
             "citations": [],
@@ -293,13 +293,13 @@ async def test_recent_recall_fetches_thread_context_when_prompt_history_is_incom
         {"message": "我刚刚说了什么？"},
         {
             **_history_context(complete_and_exact=False, exact_suffix_messages=1),
-            "tools": {"devflow_get_thread_context": get_thread_context},
+            "tools": {"devcooper_get_thread_context": get_thread_context},
         },
     )
 
     assert memory_tool_calls == 1
-    assert [call["tool_name"] for call in final["tool_calls"]] == ["devflow_get_thread_context"]
-    assert not any(call["tool_name"] == "devflow_search_evidence" for call in final["tool_calls"])
+    assert [call["tool_name"] for call in final["tool_calls"]] == ["devcooper_get_thread_context"]
+    assert not any(call["tool_name"] == "devcooper_search_evidence" for call in final["tool_calls"])
     policy = next(event for event in final["agent_events"] if event["type"] == "context_policy")
     assert policy["reason"] == "recent_history_incomplete"
 
@@ -314,7 +314,7 @@ async def test_exact_recall_request_verifies_with_thread_context() -> None:
         return {
             "route": "thread_context",
             "tool_calls": [
-                {"tool_name": "devflow_get_thread_context", "arguments": input_data, "status": "success"}
+                {"tool_name": "devcooper_get_thread_context", "arguments": input_data, "status": "success"}
             ],
             "answer": "user: hi",
             "citations": [],
@@ -324,11 +324,11 @@ async def test_exact_recall_request_verifies_with_thread_context() -> None:
     context["server_messages"][-1]["content"] = "请逐字核实我刚刚说的原话"
     final = await ChatAgent(model=RecentRecallModel()).run(  # type: ignore[arg-type]
         {"message": "请逐字核实我刚刚说的原话"},
-        {**context, "tools": {"devflow_get_thread_context": get_thread_context}},
+        {**context, "tools": {"devcooper_get_thread_context": get_thread_context}},
     )
 
     assert invocations == 1
-    assert [call["tool_name"] for call in final["tool_calls"]] == ["devflow_get_thread_context"]
+    assert [call["tool_name"] for call in final["tool_calls"]] == ["devcooper_get_thread_context"]
     policy = next(event for event in final["agent_events"] if event["type"] == "context_policy")
     assert policy["reason"] == "exact_verification_requested"
 
@@ -343,7 +343,7 @@ async def test_cross_session_recall_uses_session_events() -> None:
         return {
             "route": "session_events",
             "tool_calls": [
-                {"tool_name": "devflow_read_session_events", "arguments": input_data, "status": "success"}
+                {"tool_name": "devcooper_read_session_events", "arguments": input_data, "status": "success"}
             ],
             "answer": "上次会话决定使用短期令牌。",
             "citations": [],
@@ -353,11 +353,11 @@ async def test_cross_session_recall_uses_session_events() -> None:
     context["server_messages"][-1]["content"] = "上次会话我们决定了什么？"
     final = await ChatAgent(model=RecentRecallModel()).run(  # type: ignore[arg-type]
         {"message": "上次会话我们决定了什么？"},
-        {**context, "tools": {"devflow_read_session_events": read_session_events}},
+        {**context, "tools": {"devcooper_read_session_events": read_session_events}},
     )
 
     assert invocations == 1
-    assert [call["tool_name"] for call in final["tool_calls"]] == ["devflow_read_session_events"]
+    assert [call["tool_name"] for call in final["tool_calls"]] == ["devcooper_read_session_events"]
     policy = next(event for event in final["agent_events"] if event["type"] == "context_policy")
     assert policy["reason"] == "cross_session_request"
 
@@ -613,7 +613,7 @@ async def test_project_overview_without_llm_uses_workspace_evidence(monkeypatch)
         return {
             "route": "workspace_read_file",
             "tool_calls": [{"tool_name": "workspace.read_file", "arguments": input_data, "status": "success"}],
-            "answer": "README.md:1-2\n1: # DevFlow AI\n2: Core capability: repository analysis.",
+            "answer": "README.md:1-2\n1: # Devcooper\n2: Core capability: repository analysis.",
             "citations": [],
         }
 
@@ -734,7 +734,7 @@ def test_assignment_prompt_treats_empty_team_as_no_candidates() -> None:
     )
 
     assert "team_members: []" in prompt
-    assert "当前仓库还没有配置 DevFlow 团队成员" in prompt
+    assert "当前仓库还没有配置 Devcooper 团队成员" in prompt
     assert "不要把仓库内容" in prompt
 
 

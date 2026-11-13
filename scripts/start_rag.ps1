@@ -13,11 +13,11 @@ $backendDirectory = Join-Path $projectRoot "backend"
 $frontendDirectory = Join-Path $projectRoot "frontend"
 $pythonPath = Join-Path $backendDirectory ".venv\Scripts\python.exe"
 $dataDirectory = Join-Path $projectRoot ".data"
-$databasePath = Join-Path $dataDirectory "devflow-local-demo.db"
-$backendOutputLog = Join-Path $dataDirectory "devflow-backend.out.log"
-$backendErrorLog = Join-Path $dataDirectory "devflow-backend.err.log"
-$frontendOutputLog = Join-Path $dataDirectory "devflow-frontend.out.log"
-$frontendErrorLog = Join-Path $dataDirectory "devflow-frontend.err.log"
+$databasePath = Join-Path $dataDirectory "devcooper-local-demo.db"
+$backendOutputLog = Join-Path $dataDirectory "devcooper-backend.out.log"
+$backendErrorLog = Join-Path $dataDirectory "devcooper-backend.err.log"
+$frontendOutputLog = Join-Path $dataDirectory "devcooper-frontend.out.log"
+$frontendErrorLog = Join-Path $dataDirectory "devcooper-frontend.err.log"
 
 if (-not (Test-Path -LiteralPath $pythonPath -PathType Leaf)) {
     throw "未找到 backend/.venv。请先创建虚拟环境并安装 backend/requirements.txt。"
@@ -88,7 +88,7 @@ try {
     }
 
     $demoRepositories = Invoke-RestMethod -Uri "http://127.0.0.1:$BackendPort/api/repos" -TimeoutSec 5
-    $demoRepository = $demoRepositories | Where-Object { $_.full_name -eq "course-demo/devflow-sample-api" } | Select-Object -First 1
+    $demoRepository = $demoRepositories | Where-Object { $_.full_name -eq "course-demo/devcooper-sample-api" } | Select-Object -First 1
     if (-not $demoRepository) {
         throw "没有找到初始化后的演示仓库。"
     }
@@ -126,7 +126,7 @@ try {
         throw "前端在 60 秒内没有就绪，请检查 $frontendErrorLog。"
     }
 
-    Write-Host "DevFlow AI 本地演示已启动："
+    Write-Host "Devcooper 本地演示已启动："
     Write-Host "  前端：http://127.0.0.1:$FrontendPort"
     Write-Host "  后端：http://127.0.0.1:$BackendPort"
     Write-Host "  后端 PID：$($backendProcess.Id)"

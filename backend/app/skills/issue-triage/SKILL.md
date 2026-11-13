@@ -8,7 +8,7 @@ entrypoint: issue_agent.analyze_issue
 tools:
   - issue_agent.analyze_issue
   - rag.search_similar_documents
-  - devflow_search_evidence
+  - devcooper_search_evidence
 input_modes:
   - latest_synced_issue
   - issue_context_from_chat

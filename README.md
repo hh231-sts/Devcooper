@@ -35,7 +35,7 @@ Devcooper 是一个面向 GitHub PR / Issue 研发协作的全栈 AI Agent 项�
 python -m pytest app/tests/test_workflow_models.py app/tests/test_workflow_orchestrator.py -q
 ```
 
-真实模型测试使用隔离的测试数据，不连接真实 GitHub 仓库、不执行外部写操作，但会产生模型费用。配置自己的 `LLM_*`，并显式设置 `DEVFLOW_RUN_LIVE_LLM=1` 后运行：
+真实模型测试使用隔离的测试数据，不连接真实 GitHub 仓库、不执行外部写操作，但会产生模型费用。配置自己的 `LLM_*`，并显式设置 `DEVCOOPER_RUN_LIVE_LLM=1` 后运行：
 
 ```bash
 python -m pytest app/tests/test_workflow_live_models.py -v
@@ -119,7 +119,7 @@ npm run dev
 
 评测每条用例使用当前仓库关系库输入的可丢弃副本，保留来源 UUID 与知识库配置，不复制正式聊天历史或其他仓库。Agent、工具、记忆检索与运行时写入使用该副本；工作区文件和向量召回仍读取现有来源，不代表冻结了外部服务。聊天证据按会话重建，不会删除其他会话或仓库共享证据。后台评测与聊天准备阶段的阻塞操作均不在 API 事件循环上执行。
 
-在 `backend` 目录运行 `python -m pytest app/tests/test_concurrency_regressions.py -q` 可执行 SQLite 并发回归。需要验证真实 PostgreSQL 的锁等待和跨进程互斥时，为独立测试数据库设置 `DEVFLOW_TEST_POSTGRES_URL` 后运行同一命令；测试会创建并清理专属临时 schema，不调用真实模型或 GitHub。
+在 `backend` 目录运行 `python -m pytest app/tests/test_concurrency_regressions.py -q` 可执行 SQLite 并发回归。需要验证真实 PostgreSQL 的锁等待和跨进程互斥时，为独立测试数据库设置 `DEVCOOPER_TEST_POSTGRES_URL` 后运行同一命令；测试会创建并清理专属临时 schema，不调用真实模型或 GitHub。
 
 这些后台任务仍在后端进程内运行，并非持久任务队列。正常取消评测会保存中断状态；进程被强制终止时，旧评测仍可能保留 `queued/running`，需确认原进程已退出后重新提交，不能把旧状态当作任务仍在执行。
 
@@ -173,7 +173,7 @@ Content-Type: application/json
   "repo_id": "<repository-uuid>",
   "run_judge": true,
   "top_k": 5,
-  "suite_id": "devflow-real-project-rag-baseline"
+  "suite_id": "devcooper-real-project-rag-baseline"
 }
 ```
 

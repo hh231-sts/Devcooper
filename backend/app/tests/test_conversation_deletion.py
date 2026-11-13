@@ -37,7 +37,7 @@ def _db_session():
 
 def test_delete_conversation_removes_session_memory_and_workflow_dependencies() -> None:
     db = _db_session()
-    repo = Repository(owner="devflow", name="conversation-delete", full_name=f"devflow/{uuid.uuid4().hex}")
+    repo = Repository(owner="devcooper", name="conversation-delete", full_name=f"devcooper/{uuid.uuid4().hex}")
     db.add(repo)
     db.flush()
     target = Conversation(repo_id=repo.id, title="hi，你好")

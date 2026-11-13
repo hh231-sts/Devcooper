@@ -1,26 +1,26 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: devflow-ai-postgres
+    container_name: devcooper-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-devflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devflow}
-      POSTGRES_DB: ${POSTGRES_DB:-devflow}
+      POSTGRES_USER: ${POSTGRES_USER:-devcooper}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devcooper}
+      POSTGRES_DB: ${POSTGRES_DB:-devcooper}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
-      - devflow_postgres_data:/var/lib/postgresql/data
+      - devcooper_postgres_data:/var/lib/postgresql/data
       - ./scripts/init_pgvector.sql:/docker-entrypoint-initdb.d/01-init-pgvector.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-devflow} -d ${POSTGRES_DB:-devflow}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-devcooper} -d ${POSTGRES_DB:-devcooper}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: devflow-ai-redis
+    container_name: devcooper-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -29,7 +29,7 @@ services:
 
   etcd:
     image: quay.io/coreos/etcd:v3.5.18
-    container_name: devflow-ai-etcd
+    container_name: devcooper-etcd
     restart: unless-stopped
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
@@ -38,11 +38,11 @@ services:
       ETCD_SNAPSHOT_COUNT: "50000"
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls=http://0.0.0.0:2379 --data-dir=/etcd
     volumes:
-      - devflow_etcd_data:/etcd
+      - devcooper_etcd_data:/etcd
 
   minio:
     image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
-    container_name: devflow-ai-minio
+    container_name: devcooper-minio
     restart: unless-stopped
     environment:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
@@ -52,11 +52,11 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - devflow_minio_data:/minio_data
+      - devcooper_minio_data:/minio_data
 
   milvus:
     image: milvusdb/milvus:v2.5.4
-    container_name: devflow-ai-milvus
+    container_name: devcooper-milvus
     restart: unless-stopped
     command: ["milvus", "run", "standalone"]
     environment:
@@ -70,6 +70,6 @@ services:
       - minio
 
 volumes:
-  devflow_postgres_data:
-  devflow_etcd_data:
-  devflow_minio_data:
+  devcooper_postgres_data:
+  devcooper_etcd_data:
+  devcooper_minio_data:

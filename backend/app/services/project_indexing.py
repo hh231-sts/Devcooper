@@ -20,7 +20,7 @@ from app.services.rag.vector_store import DocumentPayload, replace_documents, st
 
 PROJECT_INDEX_SOURCE_TYPES = ["project_overview", "project_doc", "project_manifest"]
 PROJECT_INDEX_STATUSES = {"missing", "stale", "building", "ready", "failed"}
-PROJECT_INDEX_CONFIG_PATH = Path(".devflow/index.yml")
+PROJECT_INDEX_CONFIG_PATH = Path(".devcooper/index.yml")
 PROJECT_INDEX_MODES = {"auto", "allowlist"}
 
 AUTHORITATIVE_TOP_LEVEL = {"README", "ARCHITECTURE", "CONTRIBUTING"}

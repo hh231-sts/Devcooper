@@ -6,7 +6,7 @@
 
 ## 包内文件
 
-- `evals/rag_cases.json`：固定题目、参考答案、预期来源文件和硬规则。套件 ID 为 `devflow-real-project-rag-baseline`。
+- `evals/rag_cases.json`：固定题目、参考答案、预期来源文件和硬规则。套件 ID 为 `devcooper-real-project-rag-baseline`。
 - `knowledge_base/01_project_overview.md`：项目定位与 Issue、PR、CI 专用 Agent。
 - `knowledge_base/02_rag_pipeline.md`：ContextAssembler、混合 RAG 和隔离评测会话。
 - `knowledge_base/03_eval_workflow.md`：评测请求、后台任务与质量判定。
@@ -17,7 +17,7 @@
 
 ## 先检查解压内容
 
-进入 ZIP 解压后的 `DevFlow-AI` 根目录，也就是同时包含 `backend`、`frontend`、`scripts`、`docs` 的目录，运行：
+进入 ZIP 解压后的 `Devcooper` 根目录，也就是同时包含 `backend`、`frontend`、`scripts`、`docs` 的目录，运行：
 
 ```powershell
 python scripts/prepare_eval_data.py --check
@@ -35,7 +35,7 @@ python scripts/prepare_eval_data.py --check
 .\backend\.venv\Scripts\python.exe scripts/prepare_eval_data.py --demo-repo
 ```
 
-`--demo-repo` 创建或复用 `course-demo/devflow-eval-course` 这个本地仓库记录，不验证或同步 GitHub，不要求这个名称对应真实远端仓库。它不会更改已有真实仓库的配置。做这个独立课程练习时，建议在 `.env` 设置 `AUTO_SYNC_ENABLED=false` 后重启后端，避免后台定时同步演示记录。
+`--demo-repo` 创建或复用 `course-demo/devcooper-eval-course` 这个本地仓库记录，不验证或同步 GitHub，不要求这个名称对应真实远端仓库。它不会更改已有真实仓库的配置。做这个独立课程练习时，建议在 `.env` 设置 `AUTO_SYNC_ENABLED=false` 后重启后端，避免后台定时同步演示记录。
 
 如果希望使用自己已连接的仓库，改为明确指定它的 UUID。二者只选一个：
 
@@ -49,7 +49,7 @@ python scripts/prepare_eval_data.py --check
 
 ## 执行固定评测
 
-前端启动后打开 `http://127.0.0.1:3000/evals`，选择刚才导入的仓库和「DevFlow AI 固定知识问答基线（2026-10-23）」，再运行固定评测。也可以直接通过脚本提交并等待最终结果：
+前端启动后打开 `http://127.0.0.1:3000/evals`，选择刚才导入的仓库和「Devcooper 固定知识问答基线（2026-10-23）」，再运行固定评测。也可以直接通过脚本提交并等待最终结果：
 
 ```powershell
 .\backend\.venv\Scripts\python.exe scripts/prepare_eval_data.py --demo-repo --run --output .data/eval-course-result.json
@@ -66,7 +66,7 @@ Content-Type: application/json
 {
   "name": "course-fixed-rag-eval",
   "repo_id": "替换为脚本输出的仓库UUID",
-  "suite_id": "devflow-real-project-rag-baseline",
+  "suite_id": "devcooper-real-project-rag-baseline",
   "top_k": 5,
   "run_judge": true
 }

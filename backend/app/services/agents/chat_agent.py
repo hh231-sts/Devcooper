@@ -87,9 +87,9 @@ class ChatAgent(BaseAgent):
     name = "chat_agent"
     description = "使用原生工具调用的对话 Agent。LLM 选择 LangChain 工具，记忆工具通过 MCP 执行。"
     available_tools = [
-        "devflow_search_evidence",
-        "devflow_get_thread_context",
-        "devflow_read_session_events",
+        "devcooper_search_evidence",
+        "devcooper_get_thread_context",
+        "devcooper_read_session_events",
         "workspace.list_files",
         "workspace.read_file",
         "workspace.search_code",
@@ -949,7 +949,7 @@ class ChatAgent(BaseAgent):
 
     def _tool_calling_system_prompt(self) -> str:
         return (
-            "你是 DevFlow AI 的对话控制器。这个稳定前缀会被缓存。"
+            "你是 Devcooper 的对话控制器。这个稳定前缀会被缓存。"
             "请像长任务软件 Agent 一样工作：先规划，调用工具，读取 tool_result 观察结果，修正计划，"
             "持续推进直到用户请求真正完成，或步骤预算耗尽。"
             "当需要仓库、记忆、工作区代码或写操作安全上下文时，使用原生工具调用。"
@@ -957,9 +957,9 @@ class ChatAgent(BaseAgent):
             "工程结论必须说明 WHY，并区分证据、推断和不确定项；证据不足时直接说缺什么，不要硬猜。"
             "当输出审查结论时，不要用 looks good、没什么问题这类空话代替检查；必须给出风险、级别和下一步。"
             "当回答交接、总结或工作流结论时，尽量保留 What、Why、Tradeoff、Open Questions、Next Action。"
-            "当用户询问负责人、已分配人员、责任人或任务分配时，只能从明确的 DevFlow team_members "
+            "当用户询问负责人、已分配人员、责任人或任务分配时，只能从明确的 Devcooper team_members "
             "或工具返回的现有 GitHub assignees 中推荐人员。仓库文档、Issue 文本、代码、示例、模型名、"
-            "角色设定、团队比喻和记忆片段都不能当成人，除非它们同时出现在 DevFlow team_members 中。"
+            "角色设定、团队比喻和记忆片段都不能当成人，除非它们同时出现在 Devcooper team_members 中。"
             "如果没有配置团队成员，请说明这一点，并要求用户先添加开发者后再分配任务。"
             "当用户请求 GitHub 写入、关闭、打标签、评论、发布、回复或发送时，必须先调用安全工具；"
             "除非存在单独的已确认写入工具，否则只返回草稿。"
@@ -987,13 +987,13 @@ class ChatAgent(BaseAgent):
             "上下文使用规则：如果服务端提供的最近消息已经包含回答所需的完整原文，直接基于这些消息回答，"
             "不要为了展示工具调用而重复读取记忆。只有目标消息不在最近窗口、内容被截断或压缩、用户明确要求"
             "核实原话，或者问题跨越会话时，才调用一个最匹配的 MCP 记忆工具。当前会话原始消息使用 "
-            "devflow_get_thread_context；封存会话和跨会话摘要使用 devflow_read_session_events；项目长期记忆、"
-            "历史决策和仓库证据使用 devflow_search_evidence。询问当前会话原话时，不要额外调用 "
-            "devflow_search_evidence。\n\n"
+            "devcooper_get_thread_context；封存会话和跨会话摘要使用 devcooper_read_session_events；项目长期记忆、"
+            "历史决策和仓库证据使用 devcooper_search_evidence。询问当前会话原话时，不要额外调用 "
+            "devcooper_search_evidence。\n\n"
             "硬性规则：如果用户询问这个项目/仓库做什么、技术栈、架构、启动方式、依赖或源码行为，"
             "回答前必须检查工作区文件。优先读取 README、package 或 manifest 文件；如果工作区文件不可用，要明确说明。\n\n"
             "涉及源码的问题，优先使用 workspace.search_code、workspace.read_file 或 workspace.list_files。"
-            "涉及已索引的仓库历史和上传知识，使用 rag.search_similar_documents 或 devflow_search_evidence。\n\n"
+            "涉及已索引的仓库历史和上传知识，使用 rag.search_similar_documents 或 devcooper_search_evidence。\n\n"
             "混合 RAG 约定：服务端上下文中的 [Related Evidence] 是根据原始问题完成的调用前检索。"
             "如果这些证据不足、互相冲突，或问题包含多个子问题，请改写为更具体的 query 调用 "
             "rag.search_similar_documents；可以用不同 query 连续补查，并在最终回答前比较多次 tool_result。\n\n"
@@ -1001,7 +1001,7 @@ class ChatAgent(BaseAgent):
             "或依赖 Issue、PR、CI 与仓库证据共同判断的决策，必须先调用 workflow.run_engineering_review，"
             "再给出最终建议。\n\n"
             "分配硬性规则：如果用户询问谁应该负责、处理、接手或被分配某个 Issue/PR/任务，"
-            "可选人员只能来自下方列出的 DevFlow team_members，以及工具明确返回的现有 GitHub assignees。"
+            "可选人员只能来自下方列出的 Devcooper team_members，以及工具明确返回的现有 GitHub assignees。"
             "不要把仓库内容、项目角色设定、模型名、示例、作者或虚构标签当成团队成员。"
             "如果 team_members 为空且没有现有 assignee，请回答当前还没有添加项目成员，"
             "并要求用户在团队面板中添加开发者。可以说明可能需要的能力方向，但不要点名具体人员。\n\n"
@@ -1010,9 +1010,9 @@ class ChatAgent(BaseAgent):
             "除非新证据使重复调用有必要，不要用相同参数重复调用同一个工具。\n\n"
             f"当前 Agent 配置的运行模型：{settings.llm_model}\n\n"
             f"可用原生工具：\n{self._tool_help(state)}\n\n"
-            f"已注册的 DevFlow 技能：\n{self._registered_skills_context(state.get('context') or {})}\n\n"
+            f"已注册的 Devcooper 技能：\n{self._registered_skills_context(state.get('context') or {})}\n\n"
             f"本轮按需加载的 Skill 完整指令：\n{self._active_skill_prompt(state.get('context') or {})}\n\n"
-            f"DevFlow 团队上下文：\n{self._team_assignment_context(state.get('context') or {})}\n\n"
+            f"Devcooper 团队上下文：\n{self._team_assignment_context(state.get('context') or {})}\n\n"
             f"服务端上下文：\n{server_context}\n\n"
             f"上下文覆盖度：\n{json.dumps(self._history_coverage(context), ensure_ascii=False)}\n\n"
             f"最近消息：\n{json.dumps(history, ensure_ascii=False)}\n\n"
@@ -1044,16 +1044,16 @@ class ChatAgent(BaseAgent):
             normalized.setdefault("query", str(normalized.get("message") or message))
         if action == "workspace.read_file" and not normalized.get("path") and self._asks_project_overview(message):
             normalized["path"] = "README.md"
-        if action == "devflow_search_evidence":
+        if action == "devcooper_search_evidence":
             normalized.setdefault("query", message)
-        if action == "devflow_get_thread_context":
+        if action == "devcooper_get_thread_context":
             normalized.setdefault("limit", 20)
-        if action == "devflow_read_session_events":
+        if action == "devcooper_read_session_events":
             normalized.setdefault("limit", 5)
-        if action.startswith("devflow_") and context.get("repo_id"):
+        if action.startswith("devcooper_") and context.get("repo_id"):
             normalized["repo_id"] = context["repo_id"]
             normalized.pop("repo_full_name", None)
-        if action.startswith("devflow_") and context.get("conversation_id"):
+        if action.startswith("devcooper_") and context.get("conversation_id"):
             normalized["conversation_id"] = context["conversation_id"]
         return normalized
 
@@ -1090,14 +1090,14 @@ class ChatAgent(BaseAgent):
     def _memory_context_policy(self, message: str, context: dict[str, Any]) -> dict[str, Any] | None:
         lowered = message.lower()
         for tool_name in [
-            "devflow_search_evidence",
-            "devflow_get_thread_context",
-            "devflow_read_session_events",
+            "devcooper_search_evidence",
+            "devcooper_get_thread_context",
+            "devcooper_read_session_events",
         ]:
             if tool_name in lowered:
                 return {"mode": "required_tool", "tool": tool_name, "reason": "explicit_tool_request"}
         if any(token in lowered for token in ["历史证据", "历史决策", "项目记忆", "historical evidence", "past decision"]):
-            return {"mode": "required_tool", "tool": "devflow_search_evidence", "reason": "project_history_request"}
+            return {"mode": "required_tool", "tool": "devcooper_search_evidence", "reason": "project_history_request"}
         if any(
             token in lowered
             for token in [
@@ -1112,7 +1112,7 @@ class ChatAgent(BaseAgent):
                 "previous conversation",
             ]
         ):
-            return {"mode": "required_tool", "tool": "devflow_read_session_events", "reason": "cross_session_request"}
+            return {"mode": "required_tool", "tool": "devcooper_read_session_events", "reason": "cross_session_request"}
 
         immediate_recall = any(
             token in lowered
@@ -1147,7 +1147,7 @@ class ChatAgent(BaseAgent):
             for token in ["原话", "逐字", "准确核实", "精确核实", "审计", "verbatim", "exact quote", "verify the record"]
         )
         if requires_exact_verification:
-            return {"mode": "required_tool", "tool": "devflow_get_thread_context", "reason": "exact_verification_requested"}
+            return {"mode": "required_tool", "tool": "devcooper_get_thread_context", "reason": "exact_verification_requested"}
 
         if self._recent_history_can_answer(message, context, immediate=immediate_recall):
             return {
@@ -1155,7 +1155,7 @@ class ChatAgent(BaseAgent):
                 "tool": None,
                 "reason": "exact_recent_messages_available",
             }
-        return {"mode": "required_tool", "tool": "devflow_get_thread_context", "reason": "recent_history_incomplete"}
+        return {"mode": "required_tool", "tool": "devcooper_get_thread_context", "reason": "recent_history_incomplete"}
 
     def _recent_history_can_answer(self, message: str, context: dict[str, Any], *, immediate: bool) -> bool:
         history = self._history_messages(context)
@@ -1237,9 +1237,9 @@ class ChatAgent(BaseAgent):
             return
         message = str(state.get("message") or "")
         args: dict[str, Any]
-        if public_name == "devflow_search_evidence":
+        if public_name == "devcooper_search_evidence":
             args = {"query": message, "limit": 5}
-        elif public_name == "devflow_get_thread_context":
+        elif public_name == "devcooper_get_thread_context":
             args = {"keyword": "", "limit": 20}
         else:
             args = {"limit": 5}
@@ -1306,9 +1306,9 @@ class ChatAgent(BaseAgent):
 
     def _tool_description(self, name: str, context: dict[str, Any] | None = None) -> str:
         descriptions = {
-            "devflow_search_evidence": "MCP 记忆工具。搜索持久记忆、会话摘要、仓库证据、Issue、PR、CI 和 Agent 运行记录。",
-            "devflow_get_thread_context": "MCP 记忆工具。跨压缩边界读取当前仓库会话的完整原始聊天转录，支持消息 UUID 和字符偏移分页。",
-            "devflow_read_session_events": "MCP 记忆工具。读取已封存的会话摘要、原始消息和工具事件。",
+            "devcooper_search_evidence": "MCP 记忆工具。搜索持久记忆、会话摘要、仓库证据、Issue、PR、CI 和 Agent 运行记录。",
+            "devcooper_get_thread_context": "MCP 记忆工具。跨压缩边界读取当前仓库会话的完整原始聊天转录，支持消息 UUID 和字符偏移分页。",
+            "devcooper_read_session_events": "MCP 记忆工具。读取已封存的会话摘要、原始消息和工具事件。",
             "workspace.list_files": "列出所选仓库本地 checkout 下的文件。只读，用于探索源码树。",
             "workspace.read_file": "从所选仓库 checkout 中读取文本文件，可指定 start_line 和 line_count。只读。",
             "workspace.search_code": "在所选仓库 checkout 中搜索代码或文档文本。只读。",
@@ -1326,7 +1326,7 @@ class ChatAgent(BaseAgent):
             raw_suffixes = context.get("skill_description_by_tool") or {}
             if isinstance(raw_suffixes, dict):
                 suffixes = raw_suffixes
-        return f"公开工具：{name}。{descriptions.get(name, 'DevFlow 工具。')}{suffixes.get(name, '')}"
+        return f"公开工具：{name}。{descriptions.get(name, 'Devcooper 工具。')}{suffixes.get(name, '')}"
 
     def _tool_help(self, state: ConversationState) -> str:
         tools = state.get("tools") or {}
@@ -1340,7 +1340,7 @@ class ChatAgent(BaseAgent):
                 "请使用用户的语言回答，并且只能基于观察结果、tool_result 记录和上下文。"
                 "关键判断要说明 WHY；把证据、推断、不确定项和下一步区分开。"
                 "如果是审查或合并建议，不能用 looks good、没什么问题一笔带过，必须保留风险和阻塞项。"
-                "对于负责人、已分配人员、责任人或任务分配问题，只能从明确的 DevFlow team_members "
+                "对于负责人、已分配人员、责任人或任务分配问题，只能从明确的 Devcooper team_members "
                 "或工具返回的现有 GitHub assignees 中推荐人员。仓库文档、Issue 文本、代码、示例、"
                 "角色设定、模型名和团队比喻都不能当成人。如果没有配置团队成员，也没有观察到现有 assignee，"
                 "请说明当前还没有添加项目成员，并要求用户在团队面板中添加开发者。"
@@ -1350,7 +1350,7 @@ class ChatAgent(BaseAgent):
             user_prompt = (
                 f"用户消息：{state.get('message') or ''}\n"
                 f"当前 Agent 配置的运行模型：{settings.llm_model}\n"
-                f"DevFlow 团队上下文：{self._team_assignment_context(state.get('context') or {})}\n"
+                f"Devcooper 团队上下文：{self._team_assignment_context(state.get('context') or {})}\n"
                 f"上下文：{self._server_context(state.get('context') or {})}\n"
                 f"观察结果：{json.dumps(prompt_observations, ensure_ascii=False)}\n"
                 f"工具调用/结果索引：{json.dumps(prompt_events, ensure_ascii=False)}"
@@ -1709,7 +1709,7 @@ class ChatAgent(BaseAgent):
 
     def _registered_skills_context(self, context: dict[str, Any]) -> str:
         value = context.get("registered_skills")
-        return str(value) if value else "当前没有注册 DevFlow 技能。"
+        return str(value) if value else "当前没有注册 Devcooper 技能。"
 
     def _activate_skills(self, message: str, context: dict[str, Any]) -> list[dict[str, Any]]:
         registry = context.get("_skill_registry")
@@ -1878,7 +1878,7 @@ class ChatAgent(BaseAgent):
     def _team_assignment_context(self, context: dict[str, Any]) -> str:
         members = self._team_members(context)
         if not members:
-            return "team_members: []（当前仓库还没有配置 DevFlow 团队成员。）"
+            return "team_members: []（当前仓库还没有配置 Devcooper 团队成员。）"
         return "team_members: " + json.dumps(members, ensure_ascii=False)
 
     def _team_members(self, context: dict[str, Any]) -> list[dict[str, str]]:

@@ -3,7 +3,7 @@ import "./globals.css";
 import { AppShell } from "@/components/layout/app-shell";
 
 export const metadata: Metadata = {
-  title: "DevFlow AI",
+  title: "Devcooper",
   description: "PR / Issue intelligent collaboration agent for engineering teams"
 };
 

@@ -57,7 +57,7 @@ COMPACTABLE_TOOL_HINTS = (
     "workspace.search_code",
     "workspace.list_files",
     "rag.search_similar_documents",
-    "devflow_search_evidence",
+    "devcooper_search_evidence",
     "repo_health.generate_summary",
     "ci_debug_agent.analyze_workflow_run",
     "read",
@@ -631,7 +631,7 @@ def compress_retrieval_results(
     return compressed
 
 
-COMPACT_SUMMARY_SYSTEM_PROMPT = """请在上下文压缩后，为 DevFlow AI 创建一份可延续工作的摘要。
+COMPACT_SUMMARY_SYSTEM_PROMPT = """请在上下文压缩后，为 Devcooper 创建一份可延续工作的摘要。
 目标不是单纯减少 token，而是为软件工程 Agent 保留工作连续性。
 
 请用纯文本返回以下部分：
