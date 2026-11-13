@@ -1,6 +1,6 @@
-# DevFlow AI
+# Devcooper
 
-DevFlow AI 是一个面向 GitHub PR / Issue 研发协作的全栈 AI Agent 项目。系统会连接仓库数据，分析 Issue、PR diff、CI 日志、项目知识库和本地工作区代码，并返回结构化建议与安全的操作草稿。
+Devcooper 是一个面向 GitHub PR / Issue 研发协作的全栈 AI Agent 项目。系统会连接仓库数据，分析 Issue、PR diff、CI 日志、项目知识库和本地工作区代码，并返回结构化建议与安全的操作草稿。
 
 ## 核心能力
 
@@ -159,7 +159,7 @@ POST /api/rag/{repo_id}/reindex
 
 ## ChatAgent RAGAS 评测
 
-完整源码包已附带第 15.2 节的 5 条固定评测题和 4 份配套知识文档，不需要另找第 15 章下载包。先在解压后的 `DevFlow-AI` 根目录运行 `python scripts/prepare_eval_data.py --check` 核对文件；后端就绪后，使用后端虚拟环境的 Python 运行 `scripts/prepare_eval_data.py --demo-repo` 导入知识并确认套件 `ready=true`。已有仓库可以改用 `--repo-id <仓库UUID>`。安装、导入、运行和失败排查的完整步骤见 [固定评测集操作说明](docs/datas/README.md)。
+先在`Devcooper` 根目录运行 `python scripts/prepare_eval_data.py --check` 核对文件；后端就绪后，使用后端虚拟环境的 Python 运行 `scripts/prepare_eval_data.py --demo-repo` 导入知识并确认套件 `ready=true`。已有仓库可以改用 `--repo-id <仓库UUID>`。安装、导入、运行和失败排查的完整步骤见 [固定评测集操作说明](docs/datas/README.md)。
 
 启动主应用后打开 `http://127.0.0.1:3000/evals`，选择仓库、固定评测集和 Top-K，再点击“运行固定 RAGAS 评测”。评测会在隔离会话中真实运行生产 ChatAgent 和工具集，收集预检索与 Agent 二次检索证据，然后使用 Ragas 0.4 Collections API 计算 Context Precision、Context Recall、Faithfulness、Answer Relevancy 和 Agent Goal Accuracy。结果会保存评测集 Hash、阈值、逐题工具轨迹、检索证据、硬规则与失败诊断，便于对同一基线做回归。
 
