@@ -1,0 +1,47 @@
+{
+  "schema_version": 2,
+  "dataset_version": "2026-10-23",
+  "name": "devflow-real-project-rag-baseline",
+  "label": "DevFlow AI 固定知识问答基线（2026-10-23）",
+  "description": "5 条人工维护的课程回归题，配套知识位于 docs/datas/knowledge_base；须先导入当前评测仓库。用于复现调用链与回归，不是外部盲测集。",
+  "recommended": true,
+  "cases": [
+    {
+      "id": "rag-code-boundary",
+      "question": "DevFlow AI 的源码和配置以什么作为权威来源？请只回答一个来源名称，不解释原因。",
+      "reference": "当前 Git checkout。",
+      "source_file": "04_data_flow_and_sources.md",
+      "must_include": ["当前 Git checkout"],
+      "must_not_include": ["GitHub 仓库"],
+      "answer_regex": "^\\s*当前 Git checkout[。.]?\\s*$"
+    },
+    {
+      "id": "rag-specialist-agents",
+      "question": "DevFlow AI 分别使用哪三类专用 Agent 分析研发协作中的对象？请只列出三个对象的英文名称。",
+      "reference": "Issue、PR、CI。",
+      "source_file": "01_project_overview.md",
+      "must_include": ["Issue", "PR", "CI"]
+    },
+    {
+      "id": "rag-chatagent-context",
+      "question": "在 DevFlow AI 的混合 RAG 链路中，哪个组件在 ChatAgent 开始推理前检索并装配证据？请只回答组件名称。",
+      "reference": "ContextAssembler。",
+      "source_file": "02_rag_pipeline.md",
+      "must_include": ["ContextAssembler"]
+    },
+    {
+      "id": "rag-suite-input",
+      "question": "DevFlow AI 的评测 API 中，suite_id 与 cases 能否在同一次请求中提交？如果不能，HTTP 状态码是多少？请简短回答。",
+      "reference": "不能同时提交，返回 HTTP 400。",
+      "source_file": "03_eval_workflow.md",
+      "must_include": ["不能", "400"]
+    },
+    {
+      "id": "rag-judge-incomplete",
+      "question": "DevFlow AI 固定评测的硬规则全部通过，但 run_judge=false 时，evaluation_complete 和 passed 的值分别是什么？请只写两个字段和值。",
+      "reference": "evaluation_complete=false，passed=false。",
+      "source_file": "03_eval_workflow.md",
+      "must_include": ["evaluation_complete", "passed", "false"]
+    }
+  ]
+}
