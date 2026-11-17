@@ -101,6 +101,16 @@ npm run dev
 - API 文档：http://localhost:8000/docs
 - 前端：http://localhost:3000
 
+### Windows 一键启动
+
+本机 `.env` 已把后端端口调整为 `8001`、前端端口调整为 `4000`（`3000/3001/3002` 属于 Windows 保留端口），并提供了启动脚本：
+
+```powershell
+.\scripts\start_dev.cmd
+```
+
+脚本会自动检查 Docker 基础设施、本地 Qwen Embedding 模型和依赖，启动前后端并等待健康检查。首次安装、模型下载、停止命令和常见问题见 [本地启动与部署说明](docs/LOCAL_STARTUP.md)。
+
 ## 仓库同步范围与状态
 
 仓库页的手动同步默认读取 Issue、PR、CI 以及 PR 文件、Review 评论、Job 的全部分页。`POST /api/repos/{repo_id}/sync` 的 `limit` 表示每类主记录的总数上限，省略或传 `null` 为全部分页；达到上限且还有后续记录时会标记为 `partial`。首次接入默认只取少量记录；定时同步默认读取全部分页，也可通过 `AUTO_SYNC_LIMIT` 设置总数上限。所有同步均会报告实际覆盖范围。
