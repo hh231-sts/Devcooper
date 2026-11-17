@@ -9,14 +9,16 @@ async def list_workflow_runs(owner: str, repo: str, token: str | None = None, li
     return await client.get_paginated(f"/repos/{owner}/{repo}/actions/runs", item_key="workflow_runs", limit=limit)
 
 
-async def list_workflow_run_jobs(owner: str, repo: str, run_id: int, token: str | None = None, base_url: str | None = None) -> list[dict]:
+async def list_workflow_run_jobs(owner: str, repo: str, run_id: int, token: str | None = None, base_url: str | None = None, run_attempt: int | None = None) -> list[dict]:
     client = GitHubClient(token, base_url)
-    return await client.get_paginated(f"/repos/{owner}/{repo}/actions/runs/{run_id}/jobs", item_key="jobs")
+    attempt_path = f"/attempts/{run_attempt}" if run_attempt is not None else ""
+    return await client.get_paginated(f"/repos/{owner}/{repo}/actions/runs/{run_id}{attempt_path}/jobs", item_key="jobs")
 
 
-async def get_workflow_run_logs(owner: str, repo: str, run_id: int, token: str | None = None, base_url: str | None = None, max_chars: int = 80000) -> str:
+async def get_workflow_run_logs(owner: str, repo: str, run_id: int, token: str | None = None, base_url: str | None = None, max_chars: int = 80000, run_attempt: int | None = None) -> str:
     client = GitHubClient(token, base_url)
-    payload = await client.get_bytes(f"/repos/{owner}/{repo}/actions/runs/{run_id}/logs")
+    attempt_path = f"/attempts/{run_attempt}" if run_attempt is not None else ""
+    payload = await client.get_bytes(f"/repos/{owner}/{repo}/actions/runs/{run_id}{attempt_path}/logs")
     try:
         with ZipFile(BytesIO(payload)) as archive:
             parts: list[str] = []

@@ -39,6 +39,9 @@ class PullRequestResponse(BaseModel):
     author: str | None = None
     base_branch: str | None = None
     head_branch: str | None = None
+    base_sha: str | None = None
+    head_sha: str | None = None
+    merge_commit_sha: str | None = None
     merged_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

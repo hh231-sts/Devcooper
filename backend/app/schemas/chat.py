@@ -53,6 +53,7 @@ class ChatHistoryMessage(BaseModel):
     role: str
     content: str
     route: str | None = None
+    workflow_run_id: str | None = None
     tool_calls: list[ToolCallTrace] = []
     agent_events: list[dict] = []
     compression_stats: dict = {}

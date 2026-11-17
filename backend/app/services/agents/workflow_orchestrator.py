@@ -22,6 +22,16 @@ class WorkflowOrchestrator(BaseAgent):
     description = "协调 Planner、专用 Agent、Observer 和 Synthesis 完成工程决策。"
     available_tools = ["run_engineering_workflow"]
 
+    @staticmethod
+    def submit(db, repo, conversation, message, context, spec=None):
+        from app.services.review_runs import submit_review
+        return submit_review(db, repo, conversation, message, context, spec)
+
+    @staticmethod
+    async def advance_persisted(run_id):
+        from app.services.review_runs import coordinator_tick
+        await coordinator_tick(run_id)
+
     def __init__(
         self,
         task_runners: dict[str, WorkflowTaskRunner],

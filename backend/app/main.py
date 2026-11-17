@@ -24,6 +24,7 @@ from app.api.routes import (
     skills,
     webhooks,
     workspaces,
+    review_runs,
 )
 from app.core.config import settings
 from app.db.models import Base
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(pull_requests.router, prefix="/api", tags=["pull_requests"])
     app.include_router(ci.router, prefix="/api", tags=["ci"])
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+    app.include_router(review_runs.router, prefix="/api/chat/workflow-runs", tags=["workflow_reviews"])
     app.include_router(feedback.router, prefix="/api/chat/feedback", tags=["chat_feedback"])
     app.include_router(action_drafts.router, prefix="/api/action-drafts", tags=["action_drafts"])
     app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
@@ -86,6 +88,8 @@ def create_app() -> FastAPI:
     async def create_demo_tables() -> None:
         # 课程项目默认自动建表；生产风格流程会在后续加入 Alembic 迁移。
         Base.metadata.create_all(bind=engine)
+        from app.db.review_migration import upgrade_review_schema
+        upgrade_review_schema(engine)
         inspector = inspect(engine)
         if "users" in inspector.get_table_names():
             columns = {column["name"] for column in inspector.get_columns("users")}
@@ -156,12 +160,21 @@ def create_app() -> FastAPI:
         delete_milvus_documents(source_types=["code_file"], strict=False)
         if settings.auto_sync_enabled:
             app.state.repo_sync_task = asyncio.create_task(periodic_repo_sync_loop())
+        from app.services.review_runs import review_worker_loop
+        app.state.review_worker_task = asyncio.create_task(review_worker_loop())
 
     @app.on_event("shutdown")
     async def stop_background_tasks() -> None:
         task = getattr(app.state, "repo_sync_task", None)
         if task:
             task.cancel()
+        review_task = getattr(app.state, "review_worker_task", None)
+        if review_task:
+            review_task.cancel()
+            try:
+                await review_task
+            except asyncio.CancelledError:
+                pass
 
     return app
 

@@ -43,6 +43,10 @@ class GenericToolArgs(BaseModel):
     keyword: str | None = Field(default=None, description="关键词过滤")
     limit: int | None = Field(default=None, description="结果数量上限")
     repo_id: str | None = Field(default=None, description="仓库 UUID")
+    issue_id: str | None = Field(default=None, description="明确指定的 Issue UUID")
+    issue_number: int | None = Field(default=None, description="明确指定的 Issue 编号")
+    pr_id: str | None = Field(default=None, description="明确指定的 PR UUID")
+    run_id: str | None = Field(default=None, description="明确指定的 CI 运行 UUID")
     repo_full_name: str | None = Field(default=None, description="仓库完整名称")
     conversation_id: str | None = Field(default=None, description="会话 UUID")
     session_id: str | None = Field(default=None, description="会话片段 UUID")
@@ -408,7 +412,7 @@ class ChatAgent(BaseAgent):
         graph.add_conditional_edges(
             "tool_action",
             self._route_after_tool_action,
-            {"tools": "tool_action", "model": "model_decision", "limit": "max_steps_stop"},
+            {"tools": "tool_action", "model": "model_decision", "limit": "max_steps_stop", "end": END},
         )
         graph.add_edge("max_steps_stop", END)
         return graph.compile(name="chat_agent_tool_calling_graph")
@@ -547,6 +551,10 @@ class ChatAgent(BaseAgent):
             self._event("action", {"tool_name": public_action, "arguments": action_input}),
             self._event("observation", {"tool_name": public_action, "content": observation}),
         ]
+        if observation.get("workflow_run_id"):
+            next_state["pending_tool_calls"] = []
+            next_state["final_answer"] = observation["answer_preview"]
+            self._stop_loop(next_state, "workflow_submitted", "completed", {})
         return self._graph_state_update(next_state, stream_events)
 
     async def _graph_max_steps_stop(self, state: ConversationState) -> dict[str, Any]:
@@ -563,6 +571,8 @@ class ChatAgent(BaseAgent):
         return "tools" if state.get("pending_tool_calls") else "end"
 
     def _route_after_tool_action(self, state: ConversationState) -> str:
+        if state.get("stop_reason") == "workflow_submitted":
+            return "end"
         if state.get("pending_tool_calls"):
             return "tools"
         if int(state.get("step") or 0) >= self.max_steps and not str(state.get("final_answer") or "").strip():
@@ -938,7 +948,7 @@ class ChatAgent(BaseAgent):
     def _is_retriable_tool_error(self, error_kind: ToolErrorKind, public_action: str) -> bool:
         if error_kind not in {"timeout", "rate_limited", "transient_network"}:
             return False
-        if public_action in {"safety_agent.classify_action_risk", "report_agent.generate_weekly_report", "workflow.run_engineering_review"}:
+        if public_action in {"safety_agent.classify_action_risk", "report_agent.generate_weekly_report", "workflow.run_engineering_review", "issue_agent.analyze_issue", "pr_review_agent.analyze_pr", "ci_debug_agent.analyze_workflow_run"}:
             return False
         return True
 
@@ -1040,6 +1050,8 @@ class ChatAgent(BaseAgent):
             normalized.setdefault("message", message)
         if action == "workspace.search_code":
             normalized.setdefault("query", message)
+        if action in {"issue_agent.analyze_issue", "pr_review_agent.analyze_pr", "ci_debug_agent.analyze_workflow_run", "workflow.run_engineering_review"}:
+            normalized["message"] = message
         if action == "rag.search_similar_documents":
             normalized.setdefault("query", str(normalized.get("message") or message))
         if action == "workspace.read_file" and not normalized.get("path") and self._asks_project_overview(message):
@@ -1314,12 +1326,12 @@ class ChatAgent(BaseAgent):
             "workspace.search_code": "在所选仓库 checkout 中搜索代码或文档文本。只读。",
             "repo_health.generate_summary": "总结当前仓库健康状态。",
             "rag.search_similar_documents": "搜索项目历史与非结构化知识，包括 Issue 描述、PR 说明与 Review 讨论、失败 CI 日志、项目文档、上传知识和已批准的长期记忆。可传入改写后的 query，并用不同 query 连续调用以补查和交叉验证。源码优先使用 workspace 工具，团队成员和实时状态使用对应结构化工具。",
-            "issue_agent.analyze_issue": "分析最新同步的 Issue。",
-            "pr_review_agent.analyze_pr": "分析最新同步的 PR。",
-            "ci_debug_agent.analyze_workflow_run": "分析最新失败的 CI 运行。",
+            "issue_agent.analyze_issue": "按指定 issue_id/issue_number 提交后台调查并返回运行编号；只有用户明确要求最新 Issue 时才选择最新记录。",
+            "pr_review_agent.analyze_pr": "按明确 PR 目标提交固定版本的后台调查，立即返回运行编号。",
+            "ci_debug_agent.analyze_workflow_run": "提交指定 CI 运行的后台调查；未指定时只选择与目标 PR 版本关联的最新失败运行，缺失时报告缺口。",
             "report_agent.generate_weekly_report": "生成仓库报告。",
             "safety_agent.classify_action_risk": "安全起草有风险的写操作或外部发送动作。",
-            "workflow.run_engineering_review": "运行 Planner -> 专用 Agent -> Observer -> Synthesis 工作流，用于 PR 就绪度、阻塞项、优先级和多 Agent 仓库审查等跨领域工程决策。",
+            "workflow.run_engineering_review": "提交 Planner、专用 Agent、Observer、Synthesis 后台调查，立即返回运行编号；用于 PR 就绪度、阻塞项、优先级和多 Agent 仓库审查。",
         }
         suffixes = {}
         if context:
@@ -1908,6 +1920,8 @@ class ChatAgent(BaseAgent):
         limit = budget.tool_observation_tokens if str(observation.get("route") or "").startswith("workspace_") else max(300, budget.tool_observation_tokens // 3)
         compressed = clip_to_token_budget(answer, limit)
         return {
+            **({"workflow_run_id": observation["workflow_run_id"], "status": observation["status"],
+                "subscription_url": observation["subscription_url"]} if observation.get("workflow_run_id") else {}),
             "route": observation.get("route"),
             "answer_preview": compressed,
             "compression": {

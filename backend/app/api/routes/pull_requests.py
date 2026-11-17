@@ -1,17 +1,14 @@
-import asyncio
-import json
-from collections.abc import AsyncIterator
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import AnalysisResult, CodeRelation, CodeSymbol, Conversation, Document, PullRequest, Repository, WorkflowRun
 from app.db.session import get_db
-from app.schemas.pull_requests import PRAnalysisResponse, PullRequestResponse
-from app.services.agents.pr_review_agent import PRReviewAgent
+from app.schemas.pull_requests import PullRequestResponse
+from app.schemas.workflow import InvestigationSubmission
 from app.services.chat_memory import ContextAssembler
 from app.services.code_search import search_repository_code
 from app.services.rag.retrieval import search_similar_documents
@@ -20,23 +17,6 @@ from app.services.worktree_manager import cleanup_pr_snapshots, prepare_pr_workt
 router = APIRouter()
 
 PROJECT_DOC_TYPES = {"knowledge_file", "memory_note", "project_doc"}
-PUBLIC_REASONING_PROMPT = """
-你是 Devcooper 的 PR 合并就绪度 Agent。请用中文流式输出一段“公开执行过程”，帮助用户理解你如何按计划审查当前 PR。
-要求：
-- 只输出面向用户的可审计分析摘要，不输出隐藏链路思维或私有推理链。
-- 按计划说明你检查了 PR 目标、diff 风险、相关代码/文档、CI、Review 评论，并如何形成合入建议。
-- 最终建议只能围绕：建议合入 / 修改后合入 / 暂缓 / 拒绝。
-- 不要编造输入中没有的文件、CI、Issue、人员或评论。
-- 不要输出最终 JSON。
-"""
-
-
-def _encode_sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
-def _trace_item(kind: str, title: str, content: str, status: str = "done") -> dict:
-    return {"kind": kind, "title": title, "content": content, "status": status}
 
 
 def _document_evidence(items: list[dict], default_source_type: str) -> list[dict]:
@@ -371,85 +351,6 @@ def _persist_pr_analysis(
     return analysis
 
 
-def _public_reasoning_fallback(pr: PullRequest, context: dict, counts: dict) -> list[str]:
-    stats = context.get("diff_stats") or {}
-    return [
-        f"- 我先制定 Review 计划，再读取 PR #{pr.number} 的标题、描述、分支和 {counts['files']} 个变更文件。\n",
-        f"- Diff 规模为 +{stats.get('additions', 0)} / -{stats.get('deletions', 0)}，其中敏感文件 {len(stats.get('sensitive_files') or [])} 个。\n",
-        f"- 我检索了相关代码 {counts['code']} 条，其中 PR 快照代码 {counts.get('snapshot_code', 0)} 条；项目文档/记忆 {counts['documents']} 条、历史 Issue {counts['issues']} 条和会话证据 {counts['conversation']} 条。\n",
-        f"- CI 侧读取到 {counts['failed_ci']} 个失败信号，并结合 {counts['comments']} 条 review comment 判断是否阻塞。\n",
-        "- 最后将风险点、阻塞项、测试建议汇总为合入建议：建议合入、修改后合入、暂缓或拒绝。\n",
-    ]
-
-
-async def _stream_public_reasoning(agent: PRReviewAgent, pr: PullRequest, payload: dict, context: dict, counts: dict) -> AsyncIterator[str]:
-    streamed = False
-    user_payload = {
-        "pull_request": payload,
-        "plan": context.get("plan") or [],
-        "evidence_counts": counts,
-        "context_preview": {
-            "diff_stats": context.get("diff_stats"),
-            "pr_snapshot": context.get("pr_snapshot"),
-            "code_graph_impact": context.get("code_graph_impact"),
-            "code_references": context.get("code_references", [])[:3],
-            "project_documents": context.get("project_documents", [])[:3],
-            "ci_summary": context.get("ci_summary"),
-            "review_comments": context.get("review_comments", [])[:3],
-        },
-    }
-    async for chunk in agent.llm.chat_text_stream(
-        PUBLIC_REASONING_PROMPT,
-        [{"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}],
-    ):
-        streamed = True
-        yield chunk
-    if streamed:
-        return
-    for line in _public_reasoning_fallback(pr, context, counts):
-        await asyncio.sleep(0.06)
-        yield line
-
-
-async def _pr_analysis_sse(pr_id: UUID, conversation_id: UUID | None, db: Session) -> AsyncIterator[str]:
-    pr = db.query(PullRequest).options(selectinload(PullRequest.files), selectinload(PullRequest.review_comments)).filter(PullRequest.id == pr_id).one_or_none()
-    if pr is None:
-        yield _encode_sse("error", {"message": "未找到 PR"})
-        return
-    agent = PRReviewAgent()
-    payload = _pr_payload(pr)
-    plan = _pr_review_plan()
-    try:
-        yield _encode_sse("trace", _trace_item("step", "制定 Review 计划", "\n".join(f"{index + 1}. {item}" for index, item in enumerate(plan)), "done"))
-        yield _encode_sse("trace", _trace_item("step", "执行 1/6：理解 PR", f"读取 PR #{pr.number} 的标题、描述、分支、作者和变更文件列表。", "running"))
-        snapshot = _prepare_pr_snapshot_context(db, pr, enabled=True)
-        yield _encode_sse(
-            "trace",
-            _trace_item(
-                "tool",
-                "准备 PR 分支快照",
-                str(snapshot.get("message") or f"状态：{snapshot.get('status')}；代码图符号：{snapshot.get('indexed_symbols') or 0}。"),
-            ),
-        )
-        _query, context, counts = _build_pr_analysis_context(db, pr, conversation_id)
-        _augment_pr_context_with_snapshot(db, pr, _query, context, counts, snapshot)
-        context["plan"] = plan
-        yield _encode_sse("trace", _trace_item("tool", "执行 2/6：拆分 diff 风险", f"扫描 {counts['files']} 个文件，识别敏感文件 {len((context.get('diff_stats') or {}).get('sensitive_files') or [])} 个。"))
-        yield _encode_sse("trace", _trace_item("tool", "执行 3/6：读取代码和测试", f"找到 {counts['code']} 条代码线索，其中 PR 快照代码 {counts.get('snapshot_code', 0)} 条；项目文档/记忆线索 {counts['documents']} 条。"))
-        yield _encode_sse("trace", _trace_item("tool", "执行 4/6：检查 CI", f"读取最近 CI 信号，失败 run 数量：{counts['failed_ci']}。"))
-        yield _encode_sse("trace", _trace_item("tool", "执行 5/6：检索上下文", f"找到 {counts['issues']} 条历史 Issue、{counts['conversation']} 条会话证据、{counts['comments']} 条 review comment。"))
-        yield _encode_sse("trace", _trace_item("thinking", "LLM 公开执行过程", "开始综合 PR diff、代码、CI、文档和 review comment。", "running"))
-        async for chunk in _stream_public_reasoning(agent, pr, payload, context, counts):
-            yield _encode_sse("thinking_delta", {"content": chunk})
-        result = await agent.run(payload, context)
-        analysis = _persist_pr_analysis(db, pr, result, agent.llm.model, conversation_id, counts)
-        yield _encode_sse("trace", _trace_item("result", "执行 6/6：形成合入建议", f"结论：{result.get('merge_recommendation')}；风险点：{len(result.get('risk_points') or [])}；阻塞项：{len(result.get('blocking_issues') or [])}。"))
-        yield _encode_sse("final", {"analysis_id": str(analysis.id), "result": result})
-    except Exception as exc:
-        db.rollback()
-        yield _encode_sse("error", {"message": f"分析失败：{exc}"})
-
-
 @router.get("/repos/{repo_id}/pull-requests", response_model=list[PullRequestResponse])
 async def list_pull_requests(repo_id: UUID, db: Session = Depends(get_db)) -> list[PullRequest]:
     return (
@@ -469,34 +370,32 @@ async def get_pull_request(pr_id: UUID, db: Session = Depends(get_db)) -> PullRe
     return pr
 
 
-@router.post("/pull-requests/{pr_id}/analyze", response_model=PRAnalysisResponse)
-async def analyze_pull_request(
-    pr_id: UUID,
-    conversation_id: UUID | None = Query(default=None),
-    use_pr_snapshot: bool = Query(default=True),
-    use_worktree: bool | None = Query(default=None),
-    db: Session = Depends(get_db),
-) -> PRAnalysisResponse:
-    pr = db.query(PullRequest).options(selectinload(PullRequest.files), selectinload(PullRequest.review_comments)).filter(PullRequest.id == pr_id).one_or_none()
-    if pr is None:
-        raise HTTPException(status_code=404, detail="未找到 PR")
-    agent = PRReviewAgent()
-    snapshot_enabled = use_pr_snapshot if use_worktree is None else use_worktree
-    snapshot = _prepare_pr_snapshot_context(db, pr, snapshot_enabled)
-    _query, context, counts = _build_pr_analysis_context(db, pr, conversation_id)
-    _augment_pr_context_with_snapshot(db, pr, _query, context, counts, snapshot)
-    result = await agent.run(_pr_payload(pr), context)
-    analysis = _persist_pr_analysis(db, pr, result, agent.llm.model, conversation_id, counts)
-    return PRAnalysisResponse(analysis_id=analysis.id, result=result)
+async def _submit_pr(db, pr_id, conversation_id):
+    from app.services.conversations import ensure_conversation
+    from app.services.agents.pr_review_agent import PRReviewAgent
+    pr = await get_pull_request(pr_id, db)
+    repo = db.get(Repository, pr.repo_id)
+    conversation = ensure_conversation(db, repo.id, conversation_id)
+    return await PRReviewAgent().run({"pr_id": str(pr.id)}, {"db": db, "repo_id": repo.id, "conversation": conversation})
+
+
+@router.post("/pull-requests/{pr_id}/analyze", response_model=InvestigationSubmission)
+async def analyze_pull_request(pr_id: UUID, conversation_id: UUID | None = Query(None), db: Session = Depends(get_db)):
+    return await _submit_pr(db, pr_id, conversation_id)
 
 
 @router.post("/pull-requests/{pr_id}/analyze/stream")
-async def analyze_pull_request_stream(
-    pr_id: UUID,
-    conversation_id: UUID | None = Query(default=None),
-    db: Session = Depends(get_db),
-) -> StreamingResponse:
-    return StreamingResponse(_pr_analysis_sse(pr_id, conversation_id, db), media_type="text/event-stream")
+async def analyze_pull_request_stream(pr_id: UUID, request: Request, conversation_id: UUID | None = Query(None), db: Session = Depends(get_db)):
+    from app.api.routes.review_runs import submission_stream
+    submitted = await _submit_pr(db, pr_id, conversation_id)
+    return StreamingResponse(submission_stream(submitted, request), media_type="text/event-stream")
+
+
+@router.get("/pull-requests/{pr_id}/analysis-run")
+async def latest_pr_analysis_run(pr_id: UUID, db: Session = Depends(get_db)):
+    from app.services.review_runs import latest_target_run
+    await get_pull_request(pr_id, db)
+    return latest_target_run(db, "pr_review", pr_id)
 
 
 @router.post("/pull-requests/{pr_id}/snapshot")
@@ -527,7 +426,6 @@ async def cleanup_pull_request_snapshots(
     return cleanup_pr_snapshots(db, repo, max_age_hours=max_age_hours)
 
 
-@router.post("/pull-requests/{pr_id}/review-checklist")
-async def review_checklist(pr_id: UUID, db: Session = Depends(get_db)) -> dict:
-    response = await analyze_pull_request(pr_id, db=db)
-    return {"pr_id": str(pr_id), "checklist": response.result.review_checklist}
+@router.post("/pull-requests/{pr_id}/review-checklist", response_model=InvestigationSubmission)
+async def review_checklist(pr_id: UUID, db: Session = Depends(get_db)):
+    return await _submit_pr(db, pr_id, None)

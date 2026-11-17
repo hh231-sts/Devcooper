@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, Integer, String, Text, Uuid, func
+from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -120,6 +120,9 @@ class PullRequest(Base):
     author: Mapped[str | None] = mapped_column(String(200), nullable=True)
     base_branch: Mapped[str | None] = mapped_column(String(200), nullable=True)
     head_branch: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    base_sha: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    head_sha: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    merge_commit_sha: Mapped[str | None] = mapped_column(String(120), nullable=True)
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -169,6 +172,10 @@ class WorkflowRun(Base):
     status: Mapped[str] = mapped_column(String(80))
     conclusion: Mapped[str | None] = mapped_column(String(80), nullable=True)
     html_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    commit_sha: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    pull_requests_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    run_attempt: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    workflow_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     jobs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     logs_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -188,6 +195,9 @@ class AnalysisResult(Base):
     result_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     model_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_workflow_runs.id"), nullable=True, index=True)
+    task_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    result_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Document(Base):
@@ -477,6 +487,13 @@ class AgentWorkflowRun(Base):
     status: Mapped[str] = mapped_column(String(80), default="success", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    snapshot_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("review_snapshots.id"), nullable=True)
+    assistant_message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chat_messages.id"), nullable=True)
+    checkpoint_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    active_seconds: Mapped[float] = mapped_column(Float, default=0)
+    lease_owner: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested: Mapped[bool] = mapped_column(default=False)
 
 
 class AgentTaskRun(Base):
@@ -494,6 +511,81 @@ class AgentTaskRun(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    checkpoint_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    budget_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    result_version: Mapped[int] = mapped_column(Integer, default=0)
+    lease_owner: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ReviewSnapshot(Base):
+    __tablename__ = "review_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    repo_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("repositories.id"), index=True)
+    materials: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReviewCodeArchive(Base):
+    __tablename__ = "review_code_archives"
+    __table_args__ = (UniqueConstraint("snapshot_id", "commit_sha"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("review_snapshots.id"), index=True)
+    commit_sha: Mapped[str] = mapped_column(String(120))
+    archive: Mapped[bytes] = mapped_column(LargeBinary)
+
+
+class ReviewEvidence(Base):
+    __tablename__ = "review_evidence"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agent_workflow_runs.id"), index=True)
+    task_id: Mapped[str] = mapped_column(String(120))
+    source: Mapped[str] = mapped_column(String(120))
+    version: Mapped[str] = mapped_column(String(300))
+    location: Mapped[str] = mapped_column(Text)
+    excerpt: Mapped[str] = mapped_column(Text)
+
+
+class ReviewConclusion(Base):
+    __tablename__ = "review_conclusions"
+    __table_args__ = (UniqueConstraint("workflow_id", "task_id", "conclusion_id", "version"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agent_workflow_runs.id"), index=True)
+    task_id: Mapped[str] = mapped_column(String(120))
+    conclusion_id: Mapped[str] = mapped_column(String(120))
+    version: Mapped[int] = mapped_column(Integer)
+    content: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+
+class ReviewMessage(Base):
+    __tablename__ = "review_messages"
+    __table_args__ = (UniqueConstraint("workflow_id", "dedup_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agent_workflow_runs.id"), index=True)
+    request_id: Mapped[str] = mapped_column(String(120), index=True)
+    sender: Mapped[str] = mapped_column(String(120))
+    recipient: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(40))
+    dedup_key: Mapped[str] = mapped_column(String(64))
+    content: Mapped[dict[str, Any]] = mapped_column(JSON)
+    round: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReviewEvent(Base):
+    __tablename__ = "review_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agent_workflow_runs.id"), index=True)
+    task_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    kind: Mapped[str] = mapped_column(String(80))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class EvalRun(Base):

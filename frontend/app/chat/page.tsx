@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Card, PageTitle, PrimaryButton } from "@/components/ui/card";
 import { apiGet, apiPostStream } from "@/lib/api";
 import type { Repository } from "@/lib/types";
+import { WorkflowRunCard } from "@/components/workflow-run-card";
 
 const samples = [
   "Why did the latest CI fail?",
@@ -20,6 +21,7 @@ export default function ChatPage() {
   const [message, setMessage] = useState("Why did the latest CI fail?");
   const [result, setResult] = useState("");
   const [loading, setLoading] = useState(false);
+  const [workflowRunId, setWorkflowRunId] = useState("");
 
   useEffect(() => {
     apiGet<Repository[]>("/api/repos").then((items) => {
@@ -28,17 +30,33 @@ export default function ChatPage() {
     });
   }, []);
 
+  useEffect(() => {
+    setWorkflowRunId(repoId ? localStorage.getItem(`workflow-run:${repoId}`) || "" : "");
+    setResult("");
+  }, [repoId]);
+
   async function send() {
     setLoading(true);
     setResult("");
+    function showRun(id: string) {
+      setWorkflowRunId(id);
+      localStorage.setItem(`workflow-run:${repoId}`, id);
+    }
     try {
       await apiPostStream("/api/chat/stream", { repo_id: repoId, message, context: { time_range: "7d", messages: [] } }, (event, rawData) => {
+        if (event === "tool_result") {
+          const data = rawData as { content?: { workflow_run_id?: string } };
+          if (data.content?.workflow_run_id) showRun(data.content.workflow_run_id);
+        }
         if (event === "delta") {
           const data = rawData as { content?: string };
           if (data.content) setResult((current) => current + data.content);
         }
         if (event === "final") {
-          setResult(JSON.stringify(rawData, null, 2));
+          const data = rawData as { tool_calls?: Array<{ arguments?: { workflow_run_id?: string } }> };
+          const id = data.tool_calls?.find((call) => call.arguments?.workflow_run_id)?.arguments?.workflow_run_id;
+          if (id) { showRun(id); setResult(""); }
+          else setResult(JSON.stringify(rawData, null, 2));
         }
       });
     } finally {
@@ -84,6 +102,7 @@ export default function ChatPage() {
           {loading ? "Analyzing..." : "Ask Agent"}
         </PrimaryButton>
 
+        {workflowRunId && <WorkflowRunCard id={workflowRunId} />}
         {result && <pre className="mt-4 max-h-[560px] overflow-auto rounded-md border border-slate-800 bg-slate-950 p-4 text-xs text-slate-100">{result}</pre>}
       </Card>
     </>

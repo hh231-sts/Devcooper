@@ -38,6 +38,30 @@ from app.services.repository_health import repository_health_snapshot
 
 router = APIRouter()
 
+
+def _append_assistant_response(store: MessageStore, db: Session, **kwargs) -> ChatMessage:
+    """Write the response onto its already-persisted review card when one was submitted."""
+    calls = kwargs.get("tool_calls", [])
+    run_id = next(((call.get("arguments") or {}).get("workflow_run_id") for call in calls if (call.get("arguments") or {}).get("workflow_run_id")), None)
+    if run_id:
+        # Serialize chat persistence with the worker's final-report write and refresh cached ORM state.
+        workflow = db.query(AgentWorkflowRun).filter_by(id=uuid.UUID(run_id)).populate_existing().with_for_update().one_or_none()
+        card = db.get(ChatMessage, workflow.assistant_message_id, populate_existing=True) if workflow and workflow.assistant_message_id else None
+        if card:
+            card.content = workflow.final_answer or kwargs["content"]
+            card.tool_calls = calls
+            card.meta = {**(card.meta or {}), **kwargs.get("meta", {}), "workflow_run_id": run_id, "workflow_status": workflow.status}
+            db.flush()
+            return card
+    return store.append(**kwargs)
+
+
+async def _seal_chat_turn(db: Session, **kwargs) -> None:
+    # The pending card and its transcript are already durable. Its final report arrives from the worker.
+    if any((call.get("arguments") or {}).get("workflow_run_id") for call in kwargs.get("tool_calls", [])):
+        return
+    await SessionSealer(db).seal(**kwargs)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 WORKSPACE_SKIP_DIRS = {
@@ -89,12 +113,15 @@ WORKSPACE_TEXT_EXTENSIONS = {
 @router.get("/workflow-runs")
 async def list_workflow_runs(
     repo_id: uuid.UUID | None = Query(default=None),
+    conversation_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
     query = db.query(AgentWorkflowRun)
     if repo_id is not None:
         query = query.filter(AgentWorkflowRun.repo_id == repo_id)
+    if conversation_id is not None:
+        query = query.filter(AgentWorkflowRun.conversation_id == conversation_id)
     rows = query.order_by(AgentWorkflowRun.created_at.desc()).limit(limit).all()
     workflow_ids = [row.id for row in rows]
     tasks = (
@@ -115,6 +142,7 @@ async def list_workflow_runs(
             "conversation_id": str(row.conversation_id) if row.conversation_id else None,
             "goal": row.goal,
             "status": row.status,
+            "snapshot_id": str(row.snapshot_id) if row.snapshot_id else None,
             "spec": row.spec_json or {},
             "observation": row.observation_json or {},
             "final_answer": row.final_answer,
@@ -171,6 +199,7 @@ async def chat_history(
             "route": item.route,
             "tool_calls": item.tool_calls or [],
             "agent_events": (item.meta or {}).get("agent_events", []),
+            "workflow_run_id": (item.meta or {}).get("workflow_run_id"),
             "compression_stats": (item.meta or {}).get("compression_stats", {}),
             "progressive_compaction": (item.meta or {}).get("progressive_compaction", {}),
             "model_usage": (item.meta or {}).get("model_usage", []),
@@ -600,7 +629,7 @@ def _build_engineering_workflow_runtime(
     db: Session,
     message: str,
     context: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> dict[str, Any]:
     issues, prs, runs = _repo_payload(repo.id, db)
     failed_runs = [run for run in runs if run.conclusion == "failure"]
     requested_issue_number = _requested_workflow_target_number(message, "issue")
@@ -624,64 +653,21 @@ def _build_engineering_workflow_runtime(
         target_type="workflow_run",
         number_attribute="github_run_id",
     )
-    if selected_issue is None:
-        selected_issue = sorted(issues, key=_item_time, reverse=True)[0] if issues else None
     if selected_pr is None:
         selected_pr = sorted(prs, key=_item_time, reverse=True)[0] if prs else None
+    if selected_issue is None:
+        if re.search(r"(?:最新\s*(?:的\s*)?(?:Issue|工单|议题)|latest\s+issue)", message, re.I):
+            selected_issue = sorted(issues, key=_item_time, reverse=True)[0] if issues else None
+        elif selected_pr:
+            linked = {int(match) for match in re.findall(r"(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?|关联|需求)\s+#(\d+)", selected_pr.body or "", re.I)}
+            if len(linked) == 1:
+                selected_issue = next((issue for issue in issues if issue.number in linked), None)
     if selected_run is None:
-        selected_run = sorted(failed_runs, key=_item_time, reverse=True)[0] if failed_runs else None
-
-    def claimed_target(task: WorkflowTask, target_type: str, items: list[Any], fallback: Any | None) -> Any | None:
-        if task.claim.target_type != target_type:
-            raise WorkflowTargetResolutionError(
-                f"任务 {task.id} 的 claim 类型为 {task.claim.target_type!r}，预期为 {target_type!r}。"
-            )
-        if not task.claim.target_id:
-            return fallback
-        try:
-            target_id = uuid.UUID(str(task.claim.target_id))
-        except (TypeError, ValueError) as exc:
-            raise WorkflowTargetResolutionError(f"任务 {task.id} 的 claim.target_id 不是有效 UUID。") from exc
-        target = next((item for item in items if item.id == target_id), None)
-        if target is None:
-            raise WorkflowTargetResolutionError(
-                f"任务 {task.id} 的 claim 目标不存在或不属于仓库 {repo.full_name}；不会回退到最新对象。"
-            )
-        return target
+        from app.services.review_snapshot import ci_relationship
+        matching = [run for run in failed_runs if ci_relationship(selected_pr, run) in {"pr_head", "synthetic_merge"}]
+        selected_run = sorted(matching, key=_item_time, reverse=True)[0] if matching else None
 
     safe_context = _agent_context(context)
-    skill_registry = context.get("_skill_registry")
-    agent_skill_cache: dict[str, dict[str, Any]] = {}
-
-    def agent_skill_context(entrypoint: str) -> dict[str, Any]:
-        if entrypoint in agent_skill_cache:
-            return agent_skill_cache[entrypoint]
-        if not isinstance(skill_registry, SkillRegistry):
-            agent_skill_cache[entrypoint] = {}
-            return {}
-        activation = skill_registry.activate_entrypoint(entrypoint)
-        if activation is None:
-            agent_skill_cache[entrypoint] = {}
-            return {}
-        payload = activation.model_dump(mode="json")
-        runtime = {
-            "active_skills": [payload],
-            "skill_instructions": activation.prompt_block(),
-            "skill_runtime": {
-                **activation.trace_metadata(),
-                "entrypoint": activation.entrypoint,
-                "output_contract": activation.output_contract,
-                "safety_level": activation.safety_level,
-                "instructions_loaded": True,
-            },
-        }
-        agent_skill_cache[entrypoint] = runtime
-        return runtime
-
-    def with_skill_runtime(result: dict[str, Any], entrypoint: str) -> dict[str, Any]:
-        runtime = agent_skill_context(entrypoint).get("skill_runtime")
-        return {**result, "_skill_runtime": {**runtime, "validation": "entrypoint_completed"}} if runtime else result
-
     workflow_context = {
         **safe_context,
         "repo_id": str(repo.id),
@@ -703,197 +689,7 @@ def _build_engineering_workflow_runtime(
         "requires_safety": bool(_risky_action(message)),
         "team_members": safe_context.get("team_members") or [],
     }
-
-    async def run_repo_health(task: WorkflowTask, spec: WorkflowSpec, workflow_context: dict[str, Any]) -> WorkflowTaskResult:
-        answer = _repo_health_answer(repo, issues, prs, runs)
-        snapshot = repository_health_snapshot(repo, issues, prs, runs)
-        open_issue_count = len([item for item in issues if item.state == "open"])
-        open_pr_count = len([item for item in prs if item.state == "open"])
-        return WorkflowTaskResult(
-            task_id=task.id,
-            agent_name=task.agent_name,
-            task_type=task.task_type,
-            status=snapshot["status"],
-            summary=f"{snapshot['message']} 本地记录：{open_issue_count} 个打开的 Issue，{open_pr_count} 个打开的 PR，{len(failed_runs)} 次失败 CI。",
-            output={
-                **snapshot,
-                "answer": answer,
-                "open_issues": open_issue_count,
-                "open_prs": open_pr_count,
-                "failed_ci": len(failed_runs),
-            },
-            evidence_count=snapshot["evidence_count"],
-            confidence=snapshot["confidence"],
-            error=snapshot["message"] if snapshot["status"] == "error" else None,
-            citations=[{"type": "repository", "id": str(repo.id), "title": repo.full_name}],
-        )
-
-    async def run_issue_task(task: WorkflowTask, spec: WorkflowSpec, workflow_context: dict[str, Any]) -> WorkflowTaskResult:
-        issue = claimed_target(task, "issue", issues, selected_issue)
-        if issue is None:
-            return _skipped_workflow_result(task, "No synced issue is available.")
-        result = await IssueAgent().run(
-            {
-                "id": str(issue.id),
-                "title": issue.title,
-                "body": issue.body,
-                "labels": issue.labels,
-                "number": issue.number,
-                "state": issue.state,
-                "assignees": issue.assignees,
-                "author": issue.author,
-            },
-            {**safe_context, **agent_skill_context("issue_agent.analyze_issue")},
-        )
-        return WorkflowTaskResult(
-            task_id=task.id,
-            agent_name=task.agent_name,
-            task_type=task.task_type,
-            status="success",
-            summary=f"Issue #{issue.number}: {result.get('conclusion')} / {result.get('priority')} / owner {result.get('suggested_owner')}.",
-            output=with_skill_runtime(result, "issue_agent.analyze_issue"),
-            evidence_count=len(result.get("evidence") or []),
-            confidence=_safe_confidence(result.get("confidence"), 0.62),
-            citations=[{"type": "issue", "id": str(issue.id), "title": issue.title}],
-        )
-
-    async def run_pr_task(task: WorkflowTask, spec: WorkflowSpec, workflow_context: dict[str, Any]) -> WorkflowTaskResult:
-        pull_request = claimed_target(task, "pull_request", prs, selected_pr)
-        if pull_request is None:
-            return _skipped_workflow_result(task, "No synced pull request is available.")
-        ci_task = next((item for item in spec.tasks if item.task_type == "ci_debug"), None)
-        claimed_ci_run = claimed_target(ci_task, "workflow_run", runs, selected_run) if ci_task else selected_run
-        pr_context = {
-            **safe_context,
-            **agent_skill_context("pr_review_agent.analyze_pr"),
-            "repo_id": str(repo.id),
-            "ci_summary": {
-                "failed_runs": len(failed_runs),
-                "latest_failed_run": claimed_ci_run.name if claimed_ci_run and claimed_ci_run.conclusion == "failure" else None,
-            },
-        }
-        result = await PRReviewAgent().run(
-            {
-                "number": pull_request.number,
-                "title": pull_request.title,
-                "body": pull_request.body,
-                "state": pull_request.state,
-                "author": pull_request.author,
-                "merged_at": pull_request.merged_at,
-                "files": [
-                    {
-                        "filename": file.filename,
-                        "status": file.status,
-                        "additions": file.additions,
-                        "deletions": file.deletions,
-                        "patch": file.patch,
-                    }
-                    for file in pull_request.files
-                ],
-                "comments": [
-                    {
-                        "body": comment.body,
-                        "path": comment.path,
-                        "line": comment.line,
-                        "author": comment.author,
-                    }
-                    for comment in pull_request.review_comments
-                ],
-            },
-            pr_context,
-        )
-        return WorkflowTaskResult(
-            task_id=task.id,
-            agent_name=task.agent_name,
-            task_type=task.task_type,
-            status="success",
-            summary=f"PR #{pull_request.number}: {result.get('merge_recommendation')} with {len(result.get('risk_points') or [])} risk points.",
-            output=with_skill_runtime(result, "pr_review_agent.analyze_pr"),
-            evidence_count=len(pull_request.files) + len(pull_request.review_comments),
-            confidence=_safe_confidence(result.get("confidence"), 0.62),
-            citations=[{"type": "pull_request", "id": str(pull_request.id), "title": pull_request.title}],
-        )
-
-    async def run_ci_task(task: WorkflowTask, spec: WorkflowSpec, workflow_context: dict[str, Any]) -> WorkflowTaskResult:
-        workflow_run = claimed_target(task, "workflow_run", runs, selected_run)
-        if workflow_run is None:
-            return _skipped_workflow_result(task, "No synced CI run is available.")
-        result = await CIDebugAgent().run(
-            {
-                "name": workflow_run.name,
-                "status": workflow_run.status,
-                "conclusion": workflow_run.conclusion,
-                "jobs": workflow_run.jobs or [],
-                "logs_text": workflow_run.logs_text,
-            },
-            {**safe_context, **agent_skill_context("ci_debug_agent.analyze_workflow_run"), "repo_id": str(repo.id)},
-        )
-        return WorkflowTaskResult(
-            task_id=task.id,
-            agent_name=task.agent_name,
-            task_type=task.task_type,
-            status="success",
-            summary=f"CI {workflow_run.name}: {result.get('failure_type')}, merge blocking={result.get('is_merge_blocking')}.",
-            output=with_skill_runtime(result, "ci_debug_agent.analyze_workflow_run"),
-            evidence_count=len(workflow_run.jobs or []) + (1 if workflow_run.logs_text else 0),
-            confidence=_safe_confidence(result.get("confidence"), 0.58),
-            citations=[{"type": "workflow_run", "id": str(workflow_run.id), "title": workflow_run.name}],
-        )
-
-    async def run_rag_task(task: WorkflowTask, spec: WorkflowSpec, workflow_context: dict[str, Any]) -> WorkflowTaskResult:
-        query = message or spec.goal
-        answer, citations, results = _semantic_search(repo, query, safe_context, db)
-        record_recall_event(
-            db,
-            repo_id=repo.id,
-            conversation_id=uuid.UUID(str(context["conversation_id"])) if context.get("conversation_id") else None,
-            tool_name="workflow.rag_search",
-            query=query,
-            results=results,
-            citations=citations,
-            scope="project",
-            mode="hybrid",
-            metadata={"route": "workflow_rag_task", "task_id": task.id},
-        )
-        return WorkflowTaskResult(
-            task_id=task.id,
-            agent_name=task.agent_name,
-            task_type=task.task_type,
-            status="success",
-            summary=f"Retrieved {len(citations)} related historical records.",
-            output={"answer": answer, "citations": citations},
-            evidence_count=len(citations),
-            confidence=0.68 if citations else 0.45,
-            citations=citations,
-        )
-
-    async def run_safety_task(task: WorkflowTask, spec: WorkflowSpec, workflow_context: dict[str, Any]) -> WorkflowTaskResult:
-        action = _risky_action(message) or "write_back"
-        draft, citations = _draft_for_action(action, message or spec.goal, repo, issues, prs, runs)
-        result = await SafetyAgent().run(
-            {"action": action, "draft": draft},
-            {**safe_context, **agent_skill_context("safety_agent.classify_action_risk")},
-        )
-        return WorkflowTaskResult(
-            task_id=task.id,
-            agent_name=task.agent_name,
-            task_type=task.task_type,
-            status="success",
-            summary=f"Safety risk={result.get('risk_level')}, confirmation required={result.get('requires_confirmation')}.",
-            output=with_skill_runtime(result, "safety_agent.classify_action_risk"),
-            evidence_count=1,
-            confidence=0.9,
-            citations=citations,
-        )
-
-    return workflow_context, {
-        "repo_health": run_repo_health,
-        "issue_analysis": run_issue_task,
-        "pr_review": run_pr_task,
-        "ci_debug": run_ci_task,
-        "rag_search": run_rag_task,
-        "safety_review": run_safety_task,
-    }
+    return workflow_context
 
 
 def _workflow_report_status(report: dict[str, Any]) -> str:
@@ -1135,81 +931,17 @@ def _build_conversation_tools(repo: Repository | None, conversation: Conversatio
     async def analyze_issue(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         if repo is None:
             return await repo_health(input_data, context)
-        issue = db.query(Issue).filter(Issue.repo_id == repo.id).order_by(Issue.created_at.desc()).first()
-        if not issue:
-            return {"route": "issue_analysis", "tool_calls": [], "answer": f"仓库 {repo.full_name} 还没有同步到 Issue。", "citations": []}
-        result = await IssueAgent().run(
-            {
-                "id": str(issue.id),
-                "title": issue.title,
-                "body": issue.body,
-                "labels": issue.labels,
-                "number": issue.number,
-                "state": issue.state,
-                "assignees": issue.assignees,
-                "author": issue.author,
-            },
-            agent_context(context),
-        )
-        return {
-            "route": "issue_analysis",
-            "tool_calls": [{"tool_name": "issue_agent.analyze_issue", "arguments": {"issue_id": str(issue.id)}, "status": "success"}],
-            "answer": (
-                f"Issue #{issue.number} 的结论：{result['conclusion']}。\n\n"
-                f"- 分类：{result['category']}\n"
-                f"- 优先级：{result['priority']}\n"
-                f"- 复杂度：{result['complexity']}\n"
-                f"- 建议负责人：{result['suggested_owner']}，{result['owner_reason']}\n\n"
-                f"理由：{result['conclusion_reason']}\n\n"
-                f"下一步：{_join_items(result.get('checklist') or result.get('action_items') or [], '补充复现步骤、影响范围和验收标准。')}"
-            ),
-            "citations": [{"type": "issue", "id": str(issue.id), "title": issue.title}],
-        }
+        return await IssueAgent().run(input_data, {"db": db, "repo_id": repo.id, "conversation": conversation})
 
     async def analyze_pr(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         if repo is None:
             return await repo_health(input_data, context)
-        pr = (
-            db.query(PullRequest)
-            .options(selectinload(PullRequest.files), selectinload(PullRequest.review_comments))
-            .filter(PullRequest.repo_id == repo.id)
-            .order_by(PullRequest.created_at.desc())
-            .first()
-        )
-        if not pr:
-            return {"route": "pr_review", "tool_calls": [], "answer": f"仓库 {repo.full_name} 还没有同步到 PR。", "citations": []}
-        result = await PRReviewAgent().run(
-            {
-                "number": pr.number,
-                "title": pr.title,
-                "body": pr.body,
-                "files": [{"filename": file.filename, "status": file.status, "patch": file.patch} for file in pr.files],
-                "comments": [{"body": comment.body, "path": comment.path, "line": comment.line, "author": comment.author} for comment in pr.review_comments],
-            },
-            agent_context(context) | {"repo_id": str(repo.id)},
-        )
-        return {
-            "route": "pr_review",
-            "tool_calls": [{"tool_name": "pr_review_agent.analyze_pr", "arguments": {"pr_id": str(pr.id)}, "status": "success"}],
-            "answer": f"PR #{pr.number} 摘要：{result['summary']}\n\n主要风险：{_join_items(result['risk_points'], '没有明显风险。')}\n测试建议：{_join_items(result['test_suggestions'], '运行相关测试和核心流程检查。')}",
-            "citations": [{"type": "pull_request", "id": str(pr.id), "title": pr.title}],
-        }
+        return await PRReviewAgent().run(input_data, {"db": db, "repo_id": repo.id, "conversation": conversation})
 
     async def analyze_ci(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         if repo is None:
             return await repo_health(input_data, context)
-        run = db.query(WorkflowRun).filter(WorkflowRun.repo_id == repo.id, WorkflowRun.conclusion == "failure").order_by(WorkflowRun.created_at.desc()).first()
-        if not run:
-            result = await repo_health(input_data, context)
-            result["answer"] += "\n\n说明：本地没有失败 CI 记录，不能据此确认远端 CI 全部通过。"
-            return result
-        result = await CIDebugAgent().run({"name": run.name, "status": run.status, "conclusion": run.conclusion, "jobs": run.jobs or [], "logs_text": run.logs_text}, agent_context(context) | {"repo_id": str(repo.id)})
-        return {
-            "route": "ci_debug",
-            "tool_calls": [{"tool_name": "ci_debug_agent.analyze_workflow_run", "arguments": {"run_id": str(run.id)}, "status": "success"}],
-            "answer": f"最新失败 CI：{run.name}。失败类型：{result['failure_type']}。\n\n{result['failure_summary']}\n\n排查步骤：{_join_items(result['debug_steps'], '没有明确可用的排查步骤。')}",
-            "citations": [{"type": "workflow_run", "id": str(run.id), "title": run.name}],
-        }
+        return await CIDebugAgent().run(input_data, {"db": db, "repo_id": repo.id, "conversation": conversation})
 
     async def generate_report(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         if repo is None:
@@ -1320,11 +1052,7 @@ def _build_conversation_tools(repo: Repository | None, conversation: Conversatio
             return await repo_health(input_data, context)
 
         message = str(input_data.get("message") or input_data.get("query") or "").strip()
-        workflow_context, task_runners = _build_engineering_workflow_runtime(repo, db, message, context)
-        report = await WorkflowOrchestrator(task_runners).run({"message": message or "Run an engineering workflow."}, workflow_context)
-        workflow_run_id = _persist_engineering_workflow(db, repo, conversation, report)
-        report["metrics"]["workflow_run_id"] = str(workflow_run_id)
-        return _engineering_workflow_response(repo, workflow_run_id, report)
+        return WorkflowOrchestrator.submit(db, repo, conversation, message or context.get("message") or "Run an engineering workflow.", context)
 
     return {
         "workspace.list_files": list_workspace_files,
@@ -1400,9 +1128,25 @@ async def _conversation_plan(payload: ChatRequest, db: Session) -> dict[str, Any
         "repo_id": str(repo.id),
         "conversation_id": str(conversation.id),
     }
-    workflow_context, _task_runners = _build_engineering_workflow_runtime(repo, db, payload.message, context)
-    spec_data = await PlannerAgent().run({"message": payload.message}, workflow_context)
-    spec = WorkflowSpec.model_validate(spec_data)
+    workflow_context = _build_engineering_workflow_runtime(repo, db, payload.message, context)
+    import asyncio
+    from app.services.agents.investigation import structured_decision
+    from app.services.agents.workflow_models import PLAN_PROMPT, PlanProposal
+    from app.schemas.workflow import WorkflowModelExecution
+    planner = PlannerAgent()
+    catalog = planner._task_catalog(workflow_context)
+    catalog.pop("rag_search", None)
+    db.commit()
+    proposal = await asyncio.wait_for(structured_decision(PLAN_PROMPT, {"goal": payload.message,
+        "phase": "initial_plan", "task_catalog": planner._catalog_payload(catalog)}, PlanProposal), 30)
+    for proposed in proposal.tasks:
+        if proposed.task_type in {"issue_analysis", "pr_review", "ci_debug"}:
+            proposed.dependencies = []
+    spec = planner._apply_proposal(proposal, WorkflowSpec(goal=payload.message, trigger_message=payload.message), catalog)
+    for task in spec.tasks:
+        if task.task_type in {"issue_analysis", "pr_review", "ci_debug"}:
+            task.dependencies = []
+    spec.planning = spec.initial_planning = WorkflowModelExecution(mode="llm", model=settings.llm_model)
     spec_json = spec.model_dump(mode="json")
     return {
         "route": "engineering_plan",
@@ -1559,14 +1303,8 @@ async def _conversation_plan_execute_sse(payload: ChatPlanExecuteRequest, db: Se
                 },
             }
         )
-        workflow_context, task_runners = _build_engineering_workflow_runtime(repo, db, payload.message, context)
-        report = await WorkflowOrchestrator(task_runners).run_spec(spec, workflow_context)
-        workflow_run_id = _persist_engineering_workflow(db, repo, conversation, report)
-        report["metrics"]["workflow_run_id"] = str(workflow_run_id)
-        for event in _workflow_execution_trace_events(report, workflow_tool_id):
-            yield encode_sse(event)
-
-        result = _engineering_workflow_response(repo, workflow_run_id, report)
+        result = WorkflowOrchestrator.submit(db, repo, conversation, payload.message, context, spec)
+        yield encode_sse({"event": "agent_event", "data": result["agent_events"][0]})
         run_id = uuid.uuid4()
         result["run_id"] = str(run_id)
         result["compression_stats"] = assembled.compression_stats
@@ -1574,7 +1312,7 @@ async def _conversation_plan_execute_sse(payload: ChatPlanExecuteRequest, db: Se
         for index in range(0, len(result["answer"]), 48):
             yield encode_sse({"event": "delta", "data": {"content": result["answer"][index : index + 48]}})
 
-        assistant_message = message_store.append(
+        assistant_message = _append_assistant_response(message_store, db,
             repo_id=repo.id,
             conversation_id=conversation.id,
             role="assistant",
@@ -1591,9 +1329,10 @@ async def _conversation_plan_execute_sse(payload: ChatPlanExecuteRequest, db: Se
             },
         )
         result["message_id"] = str(assistant_message.id)
-        db.add(AgentRun(id=run_id, repo_id=repo.id, conversation_id=conversation.id, user_message=payload.message, route=result["route"], tool_calls=result["tool_calls"], final_answer=result["answer"], status="success"))
+        result["answer"] = assistant_message.content
+        db.add(AgentRun(id=run_id, repo_id=repo.id, conversation_id=conversation.id, user_message=payload.message, route=result["route"], tool_calls=result["tool_calls"], final_answer=result["answer"], status=assistant_message.meta.get("workflow_status", "success")))
         touch_conversation(db, conversation, user_message=payload.message, increment=2)
-        await SessionSealer(db).seal(
+        await _seal_chat_turn(db,
             repo=repo,
             conversation=conversation,
             user_message=user_message,
@@ -1610,7 +1349,7 @@ async def _conversation_plan_execute_sse(payload: ChatPlanExecuteRequest, db: Se
         db.rollback()
         run_id = uuid.uuid4()
         answer = f"执行计划失败：{exc}"
-        assistant_message = message_store.append(
+        assistant_message = _append_assistant_response(message_store, db,
             repo_id=repo.id,
             conversation_id=conversation.id,
             role="assistant",
@@ -1621,7 +1360,7 @@ async def _conversation_plan_execute_sse(payload: ChatPlanExecuteRequest, db: Se
         )
         db.add(AgentRun(id=run_id, repo_id=repo.id, conversation_id=conversation.id, user_message=payload.message, route="error", tool_calls=[], final_answer=answer, status="error"))
         touch_conversation(db, conversation, user_message=payload.message, increment=2)
-        await SessionSealer(db).seal(
+        await _seal_chat_turn(db,
             repo=repo,
             conversation=conversation,
             user_message=user_message,
@@ -1674,7 +1413,7 @@ async def _conversation_response(payload: ChatRequest, db: Session) -> dict[str,
     result["compression_stats"] = assembled.compression_stats
     result["progressive_compaction"] = compaction_stats
     assistant_message: ChatMessage | None = None
-    assistant_message = message_store.append(
+    assistant_message = _append_assistant_response(message_store, db,
         repo_id=repo.id,
         conversation_id=conversation.id,
         role="assistant",
@@ -1691,9 +1430,10 @@ async def _conversation_response(payload: ChatRequest, db: Session) -> dict[str,
         },
     )
     result["message_id"] = str(assistant_message.id)
-    db.add(AgentRun(id=run_id, repo_id=repo.id, conversation_id=conversation.id, user_message=payload.message, route=result["route"], tool_calls=result["tool_calls"], final_answer=result["answer"], status="success"))
+    result["answer"] = assistant_message.content
+    db.add(AgentRun(id=run_id, repo_id=repo.id, conversation_id=conversation.id, user_message=payload.message, route=result["route"], tool_calls=result["tool_calls"], final_answer=result["answer"], status=assistant_message.meta.get("workflow_status", "success")))
     touch_conversation(db, conversation, user_message=payload.message, increment=2)
-    await SessionSealer(db).seal(
+    await _seal_chat_turn(db,
         repo=repo,
         conversation=conversation,
         user_message=user_message,
@@ -1736,7 +1476,7 @@ async def _conversation_sse(payload: ChatRequest, db: Session):
                 event["data"]["run_id"] = str(run_id)
                 event["data"]["compression_stats"] = assembled.compression_stats
                 event["data"]["progressive_compaction"] = compaction_stats
-                assistant_message = message_store.append(
+                assistant_message = _append_assistant_response(message_store, db,
                     repo_id=repo.id,
                     conversation_id=conversation.id,
                     role="assistant",
@@ -1753,9 +1493,10 @@ async def _conversation_sse(payload: ChatRequest, db: Session):
                     },
                 )
                 event["data"]["message_id"] = str(assistant_message.id)
-                db.add(AgentRun(id=run_id, repo_id=repo.id, conversation_id=conversation.id, user_message=payload.message, route=event["data"]["route"], tool_calls=event["data"]["tool_calls"], final_answer=event["data"]["answer"], status="success"))
+                event["data"]["answer"] = assistant_message.content
+                db.add(AgentRun(id=run_id, repo_id=repo.id, conversation_id=conversation.id, user_message=payload.message, route=event["data"]["route"], tool_calls=event["data"]["tool_calls"], final_answer=event["data"]["answer"], status=assistant_message.meta.get("workflow_status", "success")))
                 touch_conversation(db, conversation, user_message=payload.message, increment=2)
-                await SessionSealer(db).seal(
+                await _seal_chat_turn(db,
                     repo=repo,
                     conversation=conversation,
                     user_message=user_message,
@@ -1782,7 +1523,7 @@ async def _conversation_sse(payload: ChatRequest, db: Session):
                 "citations": [],
             },
         }
-        assistant_message = message_store.append(
+        assistant_message = _append_assistant_response(message_store, db,
             repo_id=repo.id,
             conversation_id=conversation.id,
             role="assistant",
@@ -1794,7 +1535,7 @@ async def _conversation_sse(payload: ChatRequest, db: Session):
         failed_event["data"]["message_id"] = str(assistant_message.id)
         db.add(AgentRun(id=run_id, repo_id=repo.id, conversation_id=conversation.id, user_message=payload.message, route="error", tool_calls=[], final_answer=answer, status="error"))
         touch_conversation(db, conversation, user_message=payload.message, increment=2)
-        await SessionSealer(db).seal(
+        await _seal_chat_turn(db,
             repo=repo,
             conversation=conversation,
             user_message=user_message,
@@ -1813,6 +1554,11 @@ async def chat_plan(payload: ChatRequest, db: Session = Depends(get_db)) -> dict
         return await _conversation_plan(payload, db)
     except WorkflowTargetResolutionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        from app.services.review_runs import call_error
+        raise HTTPException(status_code=503, detail=call_error(exc, "planner")) from exc
 
 
 @router.post("/plan/execute/stream")

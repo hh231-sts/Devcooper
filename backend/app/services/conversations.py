@@ -7,6 +7,7 @@ from app.db.models import (
     AgentRun,
     AgentTaskRun,
     AgentWorkflowRun,
+    AnalysisResult,
     ChatFeedback,
     ChatMessage,
     ChatSession,
@@ -16,6 +17,10 @@ from app.db.models import (
     MemoryCandidate,
     RecallEvent,
     Repository,
+    ReviewConclusion,
+    ReviewEvidence,
+    ReviewEvent,
+    ReviewMessage,
 )
 
 
@@ -93,9 +98,17 @@ def delete_conversation(db: Session, repo_id: uuid.UUID, conversation_id: uuid.U
     if session_ids:
         db.query(MemoryCandidate).filter(MemoryCandidate.session_id.in_(session_ids)).delete(synchronize_session=False)
     db.query(RecallEvent).filter(RecallEvent.conversation_id == conversation.id).delete(synchronize_session=False)
+    # Independently executing reviews outlive their originating conversation.
     if workflow_ids:
-        db.query(AgentTaskRun).filter(AgentTaskRun.workflow_id.in_(workflow_ids)).delete(synchronize_session=False)
-    db.query(AgentWorkflowRun).filter(AgentWorkflowRun.conversation_id == conversation.id).delete(synchronize_session=False)
+        active_ids = [row.id for row in db.query(AgentWorkflowRun.id).filter(
+            AgentWorkflowRun.id.in_(workflow_ids), AgentWorkflowRun.status.in_(["queued", "running"])).all()]
+        db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id.in_(active_ids)).update(
+            {"conversation_id": None, "assistant_message_id": None}, synchronize_session=False)
+        completed_ids = set(workflow_ids) - set(active_ids)
+        db.query(AnalysisResult).filter(AnalysisResult.workflow_id.in_(completed_ids)).update({"workflow_id": None}, synchronize_session=False)
+        for model in [ReviewConclusion, ReviewEvidence, ReviewEvent, ReviewMessage, AgentTaskRun]:
+            db.query(model).filter(model.workflow_id.in_(completed_ids)).delete(synchronize_session=False)
+        db.query(AgentWorkflowRun).filter(AgentWorkflowRun.id.in_(completed_ids)).delete(synchronize_session=False)
     db.query(ChatMessage).filter(ChatMessage.conversation_id == conversation.id).delete(synchronize_session=False)
     db.query(ChatSession).filter(ChatSession.conversation_id == conversation.id).delete(synchronize_session=False)
     db.query(AgentRun).filter(AgentRun.conversation_id == conversation.id).delete(synchronize_session=False)
