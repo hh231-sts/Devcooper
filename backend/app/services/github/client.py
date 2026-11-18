@@ -75,9 +75,12 @@ class GitHubClient:
                 query = None  # The Link URL already contains its pagination parameters.
         return PaginatedItems(items, complete=True, pages=pages)
 
-    async def get_bytes(self, path: str, params: dict[str, Any] | None = None) -> bytes:
+    async def get_bytes(self, path: str, params: dict[str, Any] | None = None, *, accept: str | None = None) -> bytes:
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            response = await client.get(f"{self.base_url}{path}", headers=self._headers(), params=params)
+            headers = self._headers()
+            if accept:
+                headers["Accept"] = accept
+            response = await client.get(f"{self.base_url}{path}", headers=headers, params=params)
             response.raise_for_status()
             return response.content
 

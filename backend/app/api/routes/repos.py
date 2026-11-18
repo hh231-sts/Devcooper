@@ -12,6 +12,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.models import ActionDraft, AgentRun, AgentTaskRun, AgentWorkflowRun, AnalysisResult, AuditLog, ChatFeedback, ChatMessage, ChatSession, CodeRelation, CodeSymbol, Conversation, ConversationMemory, Document, EvidenceItem, Issue, KnowledgeBaseConfig, KnowledgeGraphEdge, KnowledgeSourceDocument, MemoryCandidate, PRFile, PRReviewComment, ProjectIndexState, PullRequest, RecallEvent, Repository, RetrievalTestRun, ThreadMemory, WorkflowRun, Workspace
+from app.db.models import ReviewCodeArchive, ReviewConclusion, ReviewEvidence, ReviewEvent, ReviewMessage, ReviewSnapshot
 from app.db.session import get_db
 from app.db.concurrency import run_blocking
 from app.schemas.repos import RepoConnectRequest, RepoConnectResponse, RepoResponse, RepoSyncRequest, RepoSyncResponse
@@ -382,6 +383,8 @@ async def delete_repo(repo_id: UUID, db: Session = Depends(get_db)) -> dict:
         )
     ).delete(synchronize_session=False)
     if workflow_ids:
+        for model in [ReviewConclusion, ReviewEvidence, ReviewEvent, ReviewMessage]:
+            db.query(model).filter(model.workflow_id.in_(workflow_ids)).delete(synchronize_session=False)
         db.query(AgentTaskRun).filter(AgentTaskRun.workflow_id.in_(workflow_ids)).delete(synchronize_session=False)
     db.query(AgentWorkflowRun).filter(
         or_(
@@ -389,6 +392,9 @@ async def delete_repo(repo_id: UUID, db: Session = Depends(get_db)) -> dict:
             AgentWorkflowRun.conversation_id.in_(conversation_ids) if conversation_ids else False,
         )
     ).delete(synchronize_session=False)
+    snapshot_ids = [row.id for row in db.query(ReviewSnapshot.id).filter_by(repo_id=repo.id).all()]
+    db.query(ReviewCodeArchive).filter(ReviewCodeArchive.snapshot_id.in_(snapshot_ids)).delete(synchronize_session=False)
+    db.query(ReviewSnapshot).filter_by(repo_id=repo.id).delete(synchronize_session=False)
     db.query(ChatMessage).filter(
         or_(
             ChatMessage.repo_id == repo.id,

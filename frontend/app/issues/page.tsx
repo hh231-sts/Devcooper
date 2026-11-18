@@ -5,13 +5,17 @@ import { useEffect, useState } from "react";
 import { Card, GhostButton, PageTitle, PrimaryButton } from "@/components/ui/card";
 import { apiGet, apiPost } from "@/lib/api";
 import type { Repository } from "@/lib/types";
+import { WorkflowRunCard } from "@/components/workflow-run-card";
 
 type Issue = { id: string; number: number; title: string; state: string; labels: string[]; body?: string };
 
 export default function IssuesPage() {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [selected, setSelected] = useState<Issue | null>(null);
-  const [analysis, setAnalysis] = useState("");
+  const [runId, setRunId] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const selectedIssueId = selected?.id;
 
   useEffect(() => {
     apiGet<Repository[]>("/api/repos").then((repos) => {
@@ -24,10 +28,25 @@ export default function IssuesPage() {
     });
   }, []);
 
+  useEffect(() => {
+    setRunId("");
+    if (!selectedIssueId) return;
+    let disposed = false;
+    apiGet<{ workflow_run_id: string | null }>(`/api/issues/${selectedIssueId}/analysis-run`).then((data) => {
+      if (!disposed) setRunId(data.workflow_run_id ?? "");
+    }).catch((reason: Error) => { if (!disposed) setError(reason.message); });
+    return () => { disposed = true; };
+  }, [selectedIssueId]);
+
   async function analyze() {
     if (!selected) return;
-    const data = await apiPost(`/api/issues/${selected.id}/analyze`, {});
-    setAnalysis(JSON.stringify(data, null, 2));
+    setSubmitting(true);
+    setError("");
+    try {
+      const data = await apiPost<{ workflow_run_id: string }>(`/api/issues/${selected.id}/analyze`, {});
+      setRunId(data.workflow_run_id);
+    } catch (reason) { setError((reason as Error).message); }
+    finally { setSubmitting(false); }
   }
 
   return (
@@ -59,8 +78,9 @@ export default function IssuesPage() {
               <div className="mt-1">{selected.body || "暂无正文"}</div>
             </div>
           )}
-          <PrimaryButton onClick={analyze} disabled={!selected} className="mt-4">分析当前 Issue</PrimaryButton>
-          {analysis && <pre className="mt-4 max-h-[520px] overflow-auto rounded-md border border-slate-800 bg-slate-950 p-4 text-xs text-slate-100">{analysis}</pre>}
+          <PrimaryButton onClick={analyze} disabled={!selected || submitting} className="mt-4">{submitting ? "正在提交" : runId ? "重新分析" : "分析当前 Issue"}</PrimaryButton>
+          {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+          {runId && <WorkflowRunCard key={runId} id={runId} />}
         </Card>
       </div>
     </>

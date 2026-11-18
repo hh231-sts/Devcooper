@@ -36,6 +36,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { apiDelete, apiGet, apiPost, apiPostStream, apiUpload } from "@/lib/api";
 import type { Repository } from "@/lib/types";
 import { FeedbackControls, type ChatFeedbackRecord } from "@/components/feedback-controls";
+import { WorkflowRunCard } from "@/components/workflow-run-card";
 
 type Issue = {
   id: string;
@@ -274,6 +275,7 @@ type ChatHistoryMessage = {
   role: "user" | "assistant";
   content: string;
   route?: string | null;
+  workflow_run_id?: string | null;
   tool_calls?: ToolCallTrace[];
   agent_events?: Array<Record<string, unknown>>;
   compression_stats?: Record<string, unknown>;
@@ -331,6 +333,8 @@ type ChatMessage = {
   contextDiagnostics?: Record<string, unknown>;
   contextCollapsed?: boolean;
   workflowPlan?: WorkflowPlan;
+  workflowRunId?: string;
+  workflowReport?: string;
   planSourceMessage?: string;
   planStatus?: "ready" | "executing" | "done" | "error";
   feedback?: ChatFeedbackRecord;
@@ -338,6 +342,7 @@ type ChatMessage = {
 
 type ToolCallTrace = {
   tool_name: string;
+  arguments?: Record<string, unknown>;
   status: string;
   error?: string;
   tool_use_id?: string;
@@ -939,18 +944,15 @@ export default function DashboardPage() {
   const [promptStateByRepo, setPromptStateByRepo] = useState<Record<string, PromptSuggestionState>>({});
   const [loadingPromptRepoId, setLoadingPromptRepoId] = useState<string | null>(null);
   const [promptLoadingDots, setPromptLoadingDots] = useState(".");
-  const [issueAnalysisById, setIssueAnalysisById] = useState<Record<string, IssueAnalysisResponse>>({});
-  const [issueAnalysisTraceById, setIssueAnalysisTraceById] = useState<Record<string, IssueAnalysisTraceItem[]>>({});
+  const [issueRunById, setIssueRunById] = useState<Record<string, string>>({});
   const [analysisModalIssueId, setAnalysisModalIssueId] = useState<string | null>(null);
   const [analyzingIssueId, setAnalyzingIssueId] = useState<string | null>(null);
   const [issueAnalysisError, setIssueAnalysisError] = useState<string | null>(null);
-  const [prAnalysisById, setPrAnalysisById] = useState<Record<string, PRAnalysisResponse>>({});
-  const [prAnalysisTraceById, setPrAnalysisTraceById] = useState<Record<string, IssueAnalysisTraceItem[]>>({});
+  const [prRunById, setPrRunById] = useState<Record<string, string>>({});
   const [analysisModalPrId, setAnalysisModalPrId] = useState<string | null>(null);
   const [analyzingPrId, setAnalyzingPrId] = useState<string | null>(null);
   const [prAnalysisError, setPrAnalysisError] = useState<string | null>(null);
-  const [ciAnalysisById, setCiAnalysisById] = useState<Record<string, CIAnalysisResponse>>({});
-  const [ciAnalysisTraceById, setCiAnalysisTraceById] = useState<Record<string, IssueAnalysisTraceItem[]>>({});
+  const [ciRunById, setCiRunById] = useState<Record<string, string>>({});
   const [analysisModalRunId, setAnalysisModalRunId] = useState<string | null>(null);
   const [analyzingRunId, setAnalyzingRunId] = useState<string | null>(null);
   const [ciAnalysisError, setCiAnalysisError] = useState<string | null>(null);
@@ -1067,346 +1069,46 @@ export default function DashboardPage() {
     }
   }
 
-  async function analyzeIssue(issue: Issue) {
+  async function analyzeIssue(issue: Issue, restart = false) {
     setAnalysisModalIssueId(issue.id);
     setIssueAnalysisError(null);
-    setIssueAnalysisById((items) => {
-      const next = { ...items };
-      delete next[issue.id];
-      return next;
-    });
-    setIssueAnalysisTraceById((items) => ({
-      ...items,
-      [issue.id]: [
-        {
-          id: `${Date.now()}-start`,
-          kind: "step",
-          title: "准备分析",
-          content: `准备分析 Issue #${issue.number}，将流式展示可见的分析过程。`,
-          status: "running"
-        }
-      ]
-    }));
     setAnalyzingIssueId(issue.id);
     try {
+      const existing = !restart ? await apiGet<{ workflow_run_id: string | null }>(`/api/issues/${issue.id}/analysis-run`) : null;
       const conversationQuery = selectedConversation?.id && !isDraftConversation ? `?conversation_id=${selectedConversation.id}` : "";
-      await apiPostStream(
-        `/api/issues/${issue.id}/analyze/stream${conversationQuery}`,
-        {},
-        (event, data) => {
-          if (event === "trace") {
-            const payload = data as Omit<IssueAnalysisTraceItem, "id">;
-            const item: IssueAnalysisTraceItem = { id: `${Date.now()}-${Math.random()}`, ...payload };
-            setIssueAnalysisTraceById((items) => ({
-              ...items,
-              [issue.id]: [...(items[issue.id] ?? []), item]
-            }));
-            return;
-          }
-          if (event === "thinking_delta") {
-            const payload = data as { content?: string };
-            const content = payload.content ?? "";
-            if (!content) return;
-            setIssueAnalysisTraceById((items) => {
-              const current = items[issue.id] ?? [];
-              const last = current[current.length - 1];
-              if (last?.kind === "thinking" && last.status === "running") {
-                return {
-                  ...items,
-                  [issue.id]: [...current.slice(0, -1), { ...last, content: `${last.content}${content}` }]
-                };
-              }
-              return {
-                ...items,
-                [issue.id]: [
-                  ...current,
-                  {
-                    id: `${Date.now()}-${Math.random()}`,
-                    kind: "thinking",
-                    title: "LLM 公开分析过程",
-                    content,
-                    status: "running"
-                  }
-                ]
-              };
-            });
-            return;
-          }
-          if (event === "final") {
-            const result = data as IssueAnalysisResponse;
-            setIssueAnalysisById((items) => ({ ...items, [issue.id]: result }));
-            setIssueAnalysisTraceById((items) => {
-              const current = (items[issue.id] ?? []).map((item) => (item.kind === "thinking" ? { ...item, status: "done" } : item));
-              return {
-                ...items,
-                [issue.id]: [
-                  ...current,
-                  {
-                    id: `${Date.now()}-final`,
-                    kind: "result",
-                    title: "分析完成",
-                    content: `已生成结构化结论：${result.result.conclusion}，优先级 ${result.result.priority}，复杂度 ${result.result.complexity}。`,
-                    status: "done"
-                  }
-                ]
-              };
-            });
-            return;
-          }
-          if (event === "error") {
-            const payload = data as { message?: string };
-            const message = payload.message || "分析失败";
-            setIssueAnalysisError(message);
-            setIssueAnalysisTraceById((items) => ({
-              ...items,
-              [issue.id]: [
-                ...(items[issue.id] ?? []),
-                { id: `${Date.now()}-error`, kind: "error", title: "分析失败", content: message, status: "error" }
-              ]
-            }));
-          }
-        }
-      );
+      const submitted = existing?.workflow_run_id ? existing : await apiPost<{ workflow_run_id: string }>(`/api/issues/${issue.id}/analyze${conversationQuery}`, {});
+      if (submitted.workflow_run_id) setIssueRunById((current) => ({ ...current, [issue.id]: submitted.workflow_run_id! }));
     } catch (error) {
       setIssueAnalysisError(getFriendlyError(error));
-      setIssueAnalysisTraceById((items) => ({
-        ...items,
-        [issue.id]: [
-          ...(items[issue.id] ?? []),
-          { id: `${Date.now()}-error`, kind: "error", title: "请求失败", content: getFriendlyError(error), status: "error" }
-        ]
-      }));
     } finally {
-      setAnalyzingIssueId((current) => (current === issue.id ? null : current));
+      setAnalyzingIssueId(null);
     }
   }
 
-  async function analyzePr(pr: PullRequest) {
+  async function analyzePr(pr: PullRequest, restart = false) {
     setAnalysisModalPrId(pr.id);
     setPrAnalysisError(null);
-    setPrAnalysisById((items) => {
-      const next = { ...items };
-      delete next[pr.id];
-      return next;
-    });
-    setPrAnalysisTraceById((items) => ({
-      ...items,
-      [pr.id]: [
-        {
-          id: `${Date.now()}-start`,
-          kind: "step",
-          title: "准备分析",
-          content: `准备分析 PR #${pr.number}，将按 plan-and-execute 方式展示 Review 计划、执行过程和合入建议。`,
-          status: "running"
-        }
-      ]
-    }));
     setAnalyzingPrId(pr.id);
     try {
+      const existing = !restart ? await apiGet<{ workflow_run_id: string | null }>(`/api/pull-requests/${pr.id}/analysis-run`) : null;
       const conversationQuery = selectedConversation?.id && !isDraftConversation ? `?conversation_id=${selectedConversation.id}` : "";
-      await apiPostStream(
-        `/api/pull-requests/${pr.id}/analyze/stream${conversationQuery}`,
-        {},
-        (event, data) => {
-          if (event === "trace") {
-            const payload = data as Omit<IssueAnalysisTraceItem, "id">;
-            const item: IssueAnalysisTraceItem = { id: `${Date.now()}-${Math.random()}`, ...payload };
-            setPrAnalysisTraceById((items) => ({
-              ...items,
-              [pr.id]: [...(items[pr.id] ?? []), item]
-            }));
-            return;
-          }
-          if (event === "thinking_delta") {
-            const payload = data as { content?: string };
-            const content = payload.content ?? "";
-            if (!content) return;
-            setPrAnalysisTraceById((items) => {
-              const current = items[pr.id] ?? [];
-              const last = current[current.length - 1];
-              if (last?.kind === "thinking" && last.status === "running") {
-                return {
-                  ...items,
-                  [pr.id]: [...current.slice(0, -1), { ...last, content: `${last.content}${content}` }]
-                };
-              }
-              return {
-                ...items,
-                [pr.id]: [
-                  ...current,
-                  {
-                    id: `${Date.now()}-${Math.random()}`,
-                    kind: "thinking",
-                    title: "LLM 公开执行过程",
-                    content,
-                    status: "running"
-                  }
-                ]
-              };
-            });
-            return;
-          }
-          if (event === "final") {
-            const result = data as PRAnalysisResponse;
-            setPrAnalysisById((items) => ({ ...items, [pr.id]: result }));
-            setPrAnalysisTraceById((items) => {
-              const current = (items[pr.id] ?? []).map((item) => (item.kind === "thinking" ? { ...item, status: "done" } : item));
-              return {
-                ...items,
-                [pr.id]: [
-                  ...current,
-                  {
-                    id: `${Date.now()}-final`,
-                    kind: "result",
-                    title: "分析完成",
-                    content: `已生成 PR 合入建议：${result.result.merge_recommendation}，风险点 ${(result.result.risk_points ?? []).length} 个，阻塞项 ${(result.result.blocking_issues ?? []).length} 个。`,
-                    status: "done"
-                  }
-                ]
-              };
-            });
-            return;
-          }
-          if (event === "error") {
-            const payload = data as { message?: string };
-            const message = payload.message || "分析失败";
-            setPrAnalysisError(message);
-            setPrAnalysisTraceById((items) => ({
-              ...items,
-              [pr.id]: [
-                ...(items[pr.id] ?? []),
-                { id: `${Date.now()}-error`, kind: "error", title: "分析失败", content: message, status: "error" }
-              ]
-            }));
-          }
-        }
-      );
-    } catch (error) {
-      setPrAnalysisError(getFriendlyError(error));
-      setPrAnalysisTraceById((items) => ({
-        ...items,
-        [pr.id]: [
-          ...(items[pr.id] ?? []),
-          { id: `${Date.now()}-error`, kind: "error", title: "请求失败", content: getFriendlyError(error), status: "error" }
-        ]
-      }));
-    } finally {
-      setAnalyzingPrId((current) => (current === pr.id ? null : current));
-    }
+      const submitted = existing?.workflow_run_id ? existing : await apiPost<{ workflow_run_id: string }>(`/api/pull-requests/${pr.id}/analyze${conversationQuery}`, {});
+      if (submitted.workflow_run_id) setPrRunById((current) => ({ ...current, [pr.id]: submitted.workflow_run_id! }));
+    } catch (reason) { setPrAnalysisError(getFriendlyError(reason)); }
+    finally { setAnalyzingPrId(null); }
   }
 
-  async function analyzeCi(run: WorkflowRun) {
+  async function analyzeCi(run: WorkflowRun, restart = false) {
     setAnalysisModalRunId(run.id);
     setCiAnalysisError(null);
-    setCiAnalysisById((items) => {
-      const next = { ...items };
-      delete next[run.id];
-      return next;
-    });
-    setCiAnalysisTraceById((items) => ({
-      ...items,
-      [run.id]: [
-        {
-          id: `${Date.now()}-start`,
-          kind: "step",
-          title: "准备排查",
-          content: `准备排查 CI「${run.name}」，将按 plan-and-execute 方式展示排查计划、执行过程、根因和阻塞判断。`,
-          status: "running"
-        }
-      ]
-    }));
     setAnalyzingRunId(run.id);
     try {
+      const existing = !restart ? await apiGet<{ workflow_run_id: string | null }>(`/api/workflow-runs/${run.id}/analysis-run`) : null;
       const conversationQuery = selectedConversation?.id && !isDraftConversation ? `?conversation_id=${selectedConversation.id}` : "";
-      await apiPostStream(
-        `/api/workflow-runs/${run.id}/analyze/stream${conversationQuery}`,
-        {},
-        (event, data) => {
-          if (event === "trace") {
-            const payload = data as Omit<IssueAnalysisTraceItem, "id">;
-            const item: IssueAnalysisTraceItem = { id: `${Date.now()}-${Math.random()}`, ...payload };
-            setCiAnalysisTraceById((items) => ({
-              ...items,
-              [run.id]: [...(items[run.id] ?? []), item]
-            }));
-            return;
-          }
-          if (event === "thinking_delta") {
-            const payload = data as { content?: string };
-            const content = payload.content ?? "";
-            if (!content) return;
-            setCiAnalysisTraceById((items) => {
-              const current = items[run.id] ?? [];
-              const last = current[current.length - 1];
-              if (last?.kind === "thinking" && last.status === "running") {
-                return {
-                  ...items,
-                  [run.id]: [...current.slice(0, -1), { ...last, content: `${last.content}${content}` }]
-                };
-              }
-              return {
-                ...items,
-                [run.id]: [
-                  ...current,
-                  {
-                    id: `${Date.now()}-${Math.random()}`,
-                    kind: "thinking",
-                    title: "LLM 公开排查过程",
-                    content,
-                    status: "running"
-                  }
-                ]
-              };
-            });
-            return;
-          }
-          if (event === "final") {
-            const result = data as CIAnalysisResponse;
-            setCiAnalysisById((items) => ({ ...items, [run.id]: result }));
-            setCiAnalysisTraceById((items) => {
-              const current = (items[run.id] ?? []).map((item) => (item.kind === "thinking" ? { ...item, status: "done" } : item));
-              return {
-                ...items,
-                [run.id]: [
-                  ...current,
-                  {
-                    id: `${Date.now()}-final`,
-                    kind: "result",
-                    title: "排查完成",
-                    content: `已生成 CI 根因判断：${result.result.failure_type}；${result.result.is_merge_blocking ? "阻塞合并" : "不阻塞合并"}。`,
-                    status: "done"
-                  }
-                ]
-              };
-            });
-            return;
-          }
-          if (event === "error") {
-            const payload = data as { message?: string };
-            const message = payload.message || "分析失败";
-            setCiAnalysisError(message);
-            setCiAnalysisTraceById((items) => ({
-              ...items,
-              [run.id]: [
-                ...(items[run.id] ?? []),
-                { id: `${Date.now()}-error`, kind: "error", title: "排查失败", content: message, status: "error" }
-              ]
-            }));
-          }
-        }
-      );
-    } catch (error) {
-      setCiAnalysisError(getFriendlyError(error));
-      setCiAnalysisTraceById((items) => ({
-        ...items,
-        [run.id]: [
-          ...(items[run.id] ?? []),
-          { id: `${Date.now()}-error`, kind: "error", title: "请求失败", content: getFriendlyError(error), status: "error" }
-        ]
-      }));
-    } finally {
-      setAnalyzingRunId((current) => (current === run.id ? null : current));
-    }
+      const submitted = existing?.workflow_run_id ? existing : await apiPost<{ workflow_run_id: string }>(`/api/workflow-runs/${run.id}/analyze${conversationQuery}`, {});
+      if (submitted.workflow_run_id) setCiRunById((current) => ({ ...current, [run.id]: submitted.workflow_run_id! }));
+    } catch (reason) { setCiAnalysisError(getFriendlyError(reason)); }
+    finally { setAnalyzingRunId(null); }
   }
 
   async function loadProjectKnowledge(repoId: string) {
@@ -1571,6 +1273,7 @@ export default function DashboardPage() {
           content: item.content,
           route: item.route ?? undefined,
           toolCalls: item.tool_calls ?? [],
+          workflowRunId: item.workflow_run_id ?? undefined,
           traceItems: traceItemsFromAgentEvents(item.agent_events ?? []),
           traceCollapsed: true,
           compressionStats: item.compression_stats,
@@ -2151,7 +1854,10 @@ export default function DashboardPage() {
           return;
         }
         if (event === "tool_result") {
-          updateAssistantToolTrace(assistantId, makeToolResultTrace(rawData as ChatStreamToolResult, crypto.randomUUID()));
+          const toolResult = rawData as ChatStreamToolResult;
+          updateAssistantToolTrace(assistantId, makeToolResultTrace(toolResult, crypto.randomUUID()));
+          const content = toolResult.content as { workflow_run_id?: string } | undefined;
+          if (content?.workflow_run_id) setMessages((items) => items.map((item) => item.id === assistantId ? { ...item, workflowRunId: content.workflow_run_id } : item));
           return;
         }
         if (event === "delta") {
@@ -2159,7 +1865,7 @@ export default function DashboardPage() {
           if (!data.content) return;
           setMessages((items) =>
             items.map((item) =>
-              item.id === assistantId ? { ...item, content: item.content + data.content, responsePending: true } : item
+              item.id === assistantId ? { ...item, content: item.workflowReport || item.content + data.content, responsePending: true } : item
               )
           );
           return;
@@ -2171,7 +1877,7 @@ export default function DashboardPage() {
               item.id === assistantId
                 ? {
                     ...item,
-                    content: data.answer,
+                    content: item.workflowReport || data.answer,
                     route: data.route,
                     toolCalls: data.tool_calls,
                     traceItems: finalizedTraceItems(data.agent_events, item.traceItems),
@@ -2333,7 +2039,7 @@ export default function DashboardPage() {
           if (!data.content) return;
           setMessages((items) =>
             items.map((item) =>
-              item.id === messageId ? { ...item, content: item.content + data.content, responsePending: true } : item
+              item.id === messageId ? { ...item, content: item.workflowReport || item.content + data.content, responsePending: true } : item
             )
           );
           return;
@@ -2345,7 +2051,7 @@ export default function DashboardPage() {
               item.id === messageId
                 ? {
                     ...item,
-                    content: data.answer,
+                    content: item.workflowReport || data.answer,
                     route: data.route,
                     toolCalls: data.tool_calls,
                     traceItems: finalizedTraceItems(data.agent_events, item.traceItems),
@@ -2888,7 +2594,9 @@ export default function DashboardPage() {
                                 onExecute={() => executeWorkflowPlan(item.id)}
                               />
                             )}
-                            {item.content.trim() ? (
+                            {(item.workflowRunId || item.toolCalls?.some((call) => call.arguments?.workflow_run_id)) ? (
+                              <WorkflowRunCard id={item.workflowRunId || String(item.toolCalls?.find((call) => call.arguments?.workflow_run_id)?.arguments?.workflow_run_id)} onReport={(answer) => setMessages((current) => current.map((message) => message.id === item.id ? { ...message, content: answer, workflowReport: answer } : message))} />
+                            ) : item.content.trim() ? (
                               <div className={item.workflowPlan ? "mt-3" : ""}>
                                 <MarkdownMessage content={item.content} />
                               </div>
@@ -3094,13 +2802,12 @@ export default function DashboardPage() {
         />
       )}
       {analysisModalIssue && (
-        <IssueAnalysisOverlay
-          issue={analysisModalIssue}
-          analysis={issueAnalysisById[analysisModalIssue.id]?.result}
-          traceItems={issueAnalysisTraceById[analysisModalIssue.id] ?? []}
+        <InvestigationOverlay
+          title={`Issue #${analysisModalIssue.number}: ${analysisModalIssue.title}`}
+          workflowRunId={issueRunById[analysisModalIssue.id]}
           loading={analyzingIssueId === analysisModalIssue.id}
           error={issueAnalysisError}
-          onRetry={() => analyzeIssue(analysisModalIssue)}
+          onRetry={() => analyzeIssue(analysisModalIssue, true)}
           onClose={() => {
             setAnalysisModalIssueId(null);
             setIssueAnalysisError(null);
@@ -3108,13 +2815,12 @@ export default function DashboardPage() {
         />
       )}
       {analysisModalPr && (
-        <PRAnalysisOverlay
-          pr={analysisModalPr}
-          analysis={prAnalysisById[analysisModalPr.id]?.result}
-          traceItems={prAnalysisTraceById[analysisModalPr.id] ?? []}
+        <InvestigationOverlay
+          title={`PR #${analysisModalPr.number}: ${analysisModalPr.title}`}
+          workflowRunId={prRunById[analysisModalPr.id]}
           loading={analyzingPrId === analysisModalPr.id}
           error={prAnalysisError}
-          onRetry={() => analyzePr(analysisModalPr)}
+          onRetry={() => analyzePr(analysisModalPr, true)}
           onClose={() => {
             setAnalysisModalPrId(null);
             setPrAnalysisError(null);
@@ -3122,13 +2828,12 @@ export default function DashboardPage() {
         />
       )}
       {analysisModalRun && (
-        <CIAnalysisOverlay
-          run={analysisModalRun}
-          analysis={ciAnalysisById[analysisModalRun.id]?.result}
-          traceItems={ciAnalysisTraceById[analysisModalRun.id] ?? []}
+        <InvestigationOverlay
+          title={`CI: ${analysisModalRun.name}`}
+          workflowRunId={ciRunById[analysisModalRun.id]}
           loading={analyzingRunId === analysisModalRun.id}
           error={ciAnalysisError}
-          onRetry={() => analyzeCi(analysisModalRun)}
+          onRetry={() => analyzeCi(analysisModalRun, true)}
           onClose={() => {
             setAnalysisModalRunId(null);
             setCiAnalysisError(null);
@@ -3631,485 +3336,24 @@ function MarkdownMessage({ content }: { content: string }) {
   );
 }
 
-function IssueAnalysisOverlay({
-  issue,
-  analysis,
-  traceItems,
-  loading,
-  error,
-  onRetry,
-  onClose
-}: {
-  issue: Issue;
-  analysis?: IssueAnalysisResult;
-  traceItems: IssueAnalysisTraceItem[];
-  loading: boolean;
-  error: string | null;
-  onRetry: () => void;
-  onClose: () => void;
+function InvestigationOverlay({ title, workflowRunId, loading, error, onRetry, onClose }: {
+  title: string; workflowRunId?: string; loading: boolean; error: string | null; onRetry: () => void; onClose: () => void;
 }) {
-  const checklist = analysis?.checklist?.length ? analysis.checklist : analysis?.action_items ?? [];
-  const drafts = analysis?.drafts;
-  const hasDrafts = Boolean(drafts?.clarification_comment || drafts?.task_breakdown);
-  const traceScrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const node = traceScrollRef.current;
-    if (!node) return;
-    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
-  }, [traceItems]);
-
   return (
-    <div className="absolute inset-0 z-50 grid grid-cols-1 items-center gap-3 bg-slate-950/35 p-4 backdrop-blur-sm xl:grid-cols-[280px_minmax(0,1fr)] xl:p-6">
-      <aside className="order-2 flex max-h-[28vh] min-h-0 flex-col overflow-hidden rounded-lg border border-teal-100 bg-white/95 shadow-xl xl:order-1 xl:h-[86vh] xl:max-h-[86vh]">
-        <div className="border-b border-line px-4 py-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">Thinking Trace</div>
-          <h3 className="mt-1 text-sm font-semibold text-ink">公开分析过程</h3>
-          <p className="mt-1 text-xs leading-5 text-slate-500">展示工具调用、证据收集和面向用户的分析摘要。</p>
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-6 backdrop-blur-sm">
+      <section className="max-h-[88vh] w-full max-w-5xl overflow-auto rounded-lg bg-white p-5 shadow-xl">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-semibold">{title}</h2>
+          <div className="flex gap-2"><button onClick={onRetry} disabled={loading} className="rounded border border-line px-3 py-1 text-sm">重新分析</button><button onClick={onClose} aria-label="关闭" className="rounded border border-line p-1"><X className="h-5 w-5" /></button></div>
         </div>
-        <div ref={traceScrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-          {traceItems.length === 0 && (
-            <div className="rounded-md border border-dashed border-line bg-panel p-3 text-xs leading-5 text-slate-500">
-              点击“重新分析”后，这里会流式显示分析步骤。
-            </div>
-          )}
-          {traceItems.map((item) => (
-            <div
-              key={item.id}
-              className={`rounded-md border p-3 text-xs leading-5 shadow-sm ${
-                item.kind === "error"
-                  ? "border-rose-200 bg-rose-50 text-rose-700"
-                  : item.kind === "thinking"
-                    ? "border-teal-200 bg-teal-50/80 text-slate-700"
-                    : "border-line bg-white text-slate-600"
-              }`}
-            >
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <span className="font-semibold text-ink">{item.title}</span>
-                {item.status === "running" && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-accent" />}
-              </div>
-              {item.kind === "thinking" ? <MarkdownMessage content={item.content} /> : <div className="whitespace-pre-wrap">{item.content}</div>}
-            </div>
-          ))}
-        </div>
-      </aside>
-
-      <div role="dialog" aria-modal="true" className="order-1 flex max-h-[86vh] min-h-0 w-full flex-col overflow-hidden rounded-lg border border-line bg-white shadow-2xl xl:order-2">
-        <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">Issue Agent</div>
-            <h3 className="mt-1 line-clamp-2 text-base font-semibold text-ink">
-              #{issue.number} {issue.title}
-            </h3>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              onClick={onRetry}
-              disabled={loading}
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-line bg-white px-2.5 text-xs text-slate-600 transition hover:bg-teal-50 disabled:opacity-50"
-              title="重新分析"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-              重新分析
-            </button>
-            <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-line bg-white text-slate-500 transition hover:bg-panel" title="关闭">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {loading && !analysis && (
-            <div className="rounded-md border border-line bg-panel p-4 text-sm text-slate-600">Issue Agent 正在检索 Issue、相似历史、代码、文档和会话上下文...</div>
-          )}
-
-          {error && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
-              分析失败：{error}
-            </div>
-          )}
-
-          {analysis && (
-            <div className="space-y-4">
-              <section className="rounded-md border border-teal-200 bg-teal-50/60 p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-white">{analysis.conclusion}</span>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600">优先级 {analysis.priority}</span>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600">复杂度 {analysis.complexity}</span>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600">分类 {analysis.category}</span>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600">置信度 {Math.round((analysis.confidence ?? 0) * 100)}%</span>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-slate-700">{analysis.conclusion_reason || analysis.summary}</p>
-              </section>
-
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">建议负责人</h4>
-                <p className="mt-2 text-sm leading-6 text-slate-700">
-                  <span className="font-semibold text-ink">{analysis.suggested_owner}</span>
-                  <span className="ml-2">{analysis.owner_reason}</span>
-                </p>
-              </section>
-
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">证据</h4>
-                <div className="mt-3 space-y-2">
-                  {(analysis.evidence ?? []).length === 0 && <div className="text-sm text-slate-500">暂无可用证据。</div>}
-                  {(analysis.evidence ?? []).map((item, index) => (
-                    <div key={`${item.source_type}-${item.reference ?? "ref"}-${index}`} className="rounded-md bg-[#fbf7f2] p-3 text-sm leading-6 text-slate-700">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] uppercase tracking-[0.08em] text-slate-500">{item.source_type}</span>
-                        <span className="font-medium text-ink">{item.title}</span>
-                        {typeof item.confidence === "number" && <span className="text-xs text-slate-400">{Math.round(item.confidence * 100)}%</span>}
-                      </div>
-                      <p className="mt-1">{item.snippet}</p>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">下一步 checklist</h4>
-                <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
-                  {checklist.map((item) => (
-                    <li key={item} className="flex gap-2">
-                      <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-accent" />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-
-              {hasDrafts && (
-                <section className="rounded-md border border-line bg-white p-4">
-                  <h4 className="text-sm font-semibold text-ink">可选草稿</h4>
-                  {drafts?.clarification_comment && (
-                    <div className="mt-3 rounded-md bg-panel p-3 text-sm leading-6 text-slate-700">
-                      <div className="mb-2 text-xs font-semibold text-slate-500">澄清评论</div>
-                      <MarkdownMessage content={drafts.clarification_comment} />
-                    </div>
-                  )}
-                  {drafts?.task_breakdown && (
-                    <div className="mt-3 rounded-md bg-panel p-3 text-sm leading-6 text-slate-700">
-                      <div className="mb-2 text-xs font-semibold text-slate-500">任务拆分说明</div>
-                      <MarkdownMessage content={drafts.task_breakdown} />
-                    </div>
-                  )}
-                </section>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+        {error && <p className="mt-3 text-rose-700">{error}</p>}
+        {loading && <p className="mt-3 text-slate-500">正在提交后台调查...</p>}
+        {workflowRunId && <WorkflowRunCard key={workflowRunId} id={workflowRunId} />}
+      </section>
     </div>
   );
 }
 
-function AgentTraceAside({
-  eyebrow,
-  title,
-  description,
-  emptyLabel,
-  traceItems
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  emptyLabel: string;
-  traceItems: IssueAnalysisTraceItem[];
-}) {
-  const traceScrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const node = traceScrollRef.current;
-    if (!node) return;
-    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
-  }, [traceItems]);
-
-  return (
-    <aside className="order-2 flex max-h-[28vh] min-h-0 flex-col overflow-hidden rounded-lg border border-teal-100 bg-white/95 shadow-xl xl:order-1 xl:h-[86vh] xl:max-h-[86vh]">
-      <div className="border-b border-line px-4 py-3">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">{eyebrow}</div>
-        <h3 className="mt-1 text-sm font-semibold text-ink">{title}</h3>
-        <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
-      </div>
-      <div ref={traceScrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-        {traceItems.length === 0 && (
-          <div className="rounded-md border border-dashed border-line bg-panel p-3 text-xs leading-5 text-slate-500">{emptyLabel}</div>
-        )}
-        {traceItems.map((item) => (
-          <div
-            key={item.id}
-            className={`rounded-md border p-3 text-xs leading-5 shadow-sm ${
-              item.kind === "error"
-                ? "border-rose-200 bg-rose-50 text-rose-700"
-                : item.kind === "thinking"
-                  ? "border-teal-200 bg-teal-50/80 text-slate-700"
-                  : "border-line bg-white text-slate-600"
-            }`}
-          >
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <span className="font-semibold text-ink">{item.title}</span>
-              {item.status === "running" && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-accent" />}
-            </div>
-            {item.kind === "thinking" ? <MarkdownMessage content={item.content} /> : <div className="whitespace-pre-wrap">{item.content}</div>}
-          </div>
-        ))}
-      </div>
-    </aside>
-  );
-}
-
-function PRAnalysisOverlay({
-  pr,
-  analysis,
-  traceItems,
-  loading,
-  error,
-  onRetry,
-  onClose
-}: {
-  pr: PullRequest;
-  analysis?: PRAnalysisResult;
-  traceItems: IssueAnalysisTraceItem[];
-  loading: boolean;
-  error: string | null;
-  onRetry: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="absolute inset-0 z-50 grid grid-cols-1 items-center gap-3 bg-slate-950/35 p-4 backdrop-blur-sm xl:grid-cols-[280px_minmax(0,1fr)] xl:p-6">
-      <AgentTraceAside
-        eyebrow="Plan & Execute"
-        title="PR Review 过程"
-        description="展示 Review 计划、执行步骤、证据收集和合入判断。"
-        emptyLabel="点击“重新分析”后，这里会流式显示 PR Review 计划和执行过程。"
-        traceItems={traceItems}
-      />
-
-      <div role="dialog" aria-modal="true" className="order-1 flex max-h-[86vh] min-h-0 w-full flex-col overflow-hidden rounded-lg border border-line bg-white shadow-2xl xl:order-2">
-        <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">PR Merge Readiness Agent</div>
-            <h3 className="mt-1 line-clamp-2 text-base font-semibold text-ink">
-              #{pr.number} {pr.title}
-            </h3>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              onClick={onRetry}
-              disabled={loading}
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-line bg-white px-2.5 text-xs text-slate-600 transition hover:bg-teal-50 disabled:opacity-50"
-              title="重新分析"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-              重新分析
-            </button>
-            <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-line bg-white text-slate-500 transition hover:bg-panel" title="关闭">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {loading && !analysis && (
-            <div className="rounded-md border border-line bg-panel p-4 text-sm text-slate-600">PR Agent 正在制定 Review 计划，并检查 diff、代码、CI、文档和 review comments...</div>
-          )}
-
-          {error && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
-              分析失败：{error}
-            </div>
-          )}
-
-          {analysis && (
-            <div className="space-y-4">
-              <section className="rounded-md border border-teal-200 bg-teal-50/60 p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-white">{analysis.merge_recommendation}</span>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600">置信度 {Math.round((analysis.confidence ?? 0) * 100)}%</span>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600">风险点 {(analysis.risk_points ?? []).length}</span>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600">阻塞项 {(analysis.blocking_issues ?? []).length}</span>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-slate-700">{analysis.recommendation_reason || analysis.summary}</p>
-              </section>
-
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">Review 计划与执行</h4>
-                <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  <AnalysisBulletList title="计划" items={analysis.plan ?? []} emptyLabel="暂无计划。" />
-                  <AnalysisBulletList title="已执行" items={analysis.executed_steps ?? []} emptyLabel="暂无执行记录。" />
-                </div>
-              </section>
-
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">变更与风险</h4>
-                <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  <AnalysisBulletList title="关键变更" items={analysis.key_changes ?? []} emptyLabel="暂无关键变更摘要。" />
-                  <AnalysisBulletList title="风险点" items={analysis.risk_points ?? []} emptyLabel="暂无明显风险点。" tone="warn" />
-                  <AnalysisBulletList title="阻塞项" items={analysis.blocking_issues ?? []} emptyLabel="暂无阻塞项。" tone="danger" />
-                  <AnalysisBulletList title="重点文件" items={analysis.files_need_attention ?? []} emptyLabel="暂无重点文件。" />
-                </div>
-              </section>
-
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">合入前动作</h4>
-                <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  <AnalysisBulletList title="Review checklist" items={analysis.review_checklist ?? []} emptyLabel="暂无 checklist。" />
-                  <AnalysisBulletList title="测试建议" items={analysis.test_suggestions ?? []} emptyLabel="暂无测试建议。" />
-                </div>
-              </section>
-
-              {(analysis.review_comments ?? []).length > 0 && (
-                <section className="rounded-md border border-line bg-white p-4">
-                  <h4 className="text-sm font-semibold text-ink">Review comments 摘要</h4>
-                  <AnalysisBulletList items={analysis.review_comments ?? []} emptyLabel="暂无 review comments。" />
-                </section>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CIAnalysisOverlay({
-  run,
-  analysis,
-  traceItems,
-  loading,
-  error,
-  onRetry,
-  onClose
-}: {
-  run: WorkflowRun;
-  analysis?: CIAnalysisResult;
-  traceItems: IssueAnalysisTraceItem[];
-  loading: boolean;
-  error: string | null;
-  onRetry: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="absolute inset-0 z-50 grid grid-cols-1 items-center gap-3 bg-slate-950/35 p-4 backdrop-blur-sm xl:grid-cols-[280px_minmax(0,1fr)] xl:p-6">
-      <AgentTraceAside
-        eyebrow="Plan & Execute"
-        title="CI 排查过程"
-        description="展示排查计划、失败定位、日志证据和阻塞判断。"
-        emptyLabel="点击“重新分析”后，这里会流式显示 CI 排查计划和执行过程。"
-        traceItems={traceItems}
-      />
-
-      <div role="dialog" aria-modal="true" className="order-1 flex max-h-[86vh] min-h-0 w-full flex-col overflow-hidden rounded-lg border border-line bg-white shadow-2xl xl:order-2">
-        <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">CI Root Cause Agent</div>
-            <h3 className="mt-1 line-clamp-2 text-base font-semibold text-ink">{run.name}</h3>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              onClick={onRetry}
-              disabled={loading}
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-line bg-white px-2.5 text-xs text-slate-600 transition hover:bg-teal-50 disabled:opacity-50"
-              title="重新分析"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-              重新分析
-            </button>
-            <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-line bg-white text-slate-500 transition hover:bg-panel" title="关闭">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {loading && !analysis && (
-            <div className="rounded-md border border-line bg-panel p-4 text-sm text-slate-600">CI Agent 正在制定排查计划，并检查失败 job、错误日志、相关文件和最近 PR...</div>
-          )}
-
-          {error && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
-              分析失败：{error}
-            </div>
-          )}
-
-          {analysis && (
-            <div className="space-y-4">
-              <section className="rounded-md border border-teal-200 bg-teal-50/60 p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-white">{analysis.failure_type}</span>
-                  <span className={`rounded-full px-2.5 py-1 text-xs ${analysis.is_merge_blocking ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>
-                    {analysis.is_merge_blocking ? "阻塞合并" : "不阻塞合并"}
-                  </span>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600">置信度 {Math.round((analysis.confidence ?? 0) * 100)}%</span>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-slate-700">{analysis.root_cause || analysis.failure_summary}</p>
-                {analysis.blocking_reason && <p className="mt-2 text-xs leading-5 text-slate-500">{analysis.blocking_reason}</p>}
-              </section>
-
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">排查计划与执行</h4>
-                <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  <AnalysisBulletList title="计划" items={analysis.plan ?? []} emptyLabel="暂无计划。" />
-                  <AnalysisBulletList title="已执行" items={analysis.executed_steps ?? []} emptyLabel="暂无执行记录。" />
-                </div>
-              </section>
-
-              {analysis.first_error && (
-                <section className="rounded-md border border-line bg-white p-4">
-                  <h4 className="text-sm font-semibold text-ink">首个关键错误块</h4>
-                  <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-rose-200 bg-rose-50 p-3 text-xs leading-5 text-rose-900">{analysis.first_error}</pre>
-                </section>
-              )}
-
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">根因与修复</h4>
-                <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  <AnalysisBulletList title="可能原因" items={analysis.possible_causes ?? []} emptyLabel="暂无可能原因。" tone="warn" />
-                  <AnalysisBulletList title="修复步骤" items={analysis.fix_steps ?? []} emptyLabel="暂无修复步骤。" />
-                  <AnalysisBulletList title="排查步骤" items={analysis.debug_steps ?? []} emptyLabel="暂无排查步骤。" />
-                  <AnalysisBulletList title="相关文件" items={analysis.related_files ?? []} emptyLabel="暂无相关文件。" />
-                </div>
-              </section>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AnalysisBulletList({
-  title,
-  items,
-  emptyLabel,
-  tone = "default"
-}: {
-  title?: string;
-  items: string[];
-  emptyLabel: string;
-  tone?: "default" | "warn" | "danger";
-}) {
-  const iconClass = tone === "danger" ? "text-rose-500" : tone === "warn" ? "text-amber-500" : "text-accent";
-  const Icon = tone === "default" ? CheckCircle2 : AlertTriangle;
-  return (
-    <div className="rounded-md bg-[#fbf7f2] p-3">
-      {title && <div className="text-xs font-semibold text-slate-500">{title}</div>}
-      {items.length === 0 ? (
-        <div className={`${title ? "mt-2" : ""} text-sm text-slate-500`}>{emptyLabel}</div>
-      ) : (
-        <ul className={`${title ? "mt-2" : ""} space-y-2 text-sm leading-6 text-slate-700`}>
-          {items.map((item) => (
-            <li key={item} className="flex gap-2">
-              <Icon className={`mt-1 h-4 w-4 shrink-0 ${iconClass}`} />
-              <span>{item}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
 
 function AddProjectOverlay({
   source,

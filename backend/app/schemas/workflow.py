@@ -35,7 +35,7 @@ class WorkflowTask(BaseModel):
 
 
 class WorkflowModelExecution(BaseModel):
-    mode: Literal["llm", "rules", "rules_fallback"]
+    mode: Literal["llm", "rules", "rules_fallback", "error"]
     model: str = ""
     reason: str = ""
 
@@ -98,3 +98,11 @@ class WorkflowReport(BaseModel):
     metrics: dict[str, Any] = Field(default_factory=dict)
     agent_events: list[dict[str, Any]] = Field(default_factory=list)
     synthesis: WorkflowModelExecution | None = None
+
+
+class InvestigationSubmission(BaseModel):
+    workflow_run_id: str
+    status: str
+    subscription_url: str
+    detail_url: str
+    answer: str

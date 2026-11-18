@@ -6,6 +6,7 @@ import { AlertTriangle, CheckCircle2, Clock3, Database, GitBranch, Workflow } fr
 import { apiGet } from "@/lib/api";
 import type { Repository } from "@/lib/types";
 import { PageTitle } from "@/components/ui/card";
+import { WorkflowRunCard } from "@/components/workflow-run-card";
 
 type WorkflowTask = {
   id: string;
@@ -19,6 +20,7 @@ type WorkflowTask = {
 
 type WorkflowRun = {
   id: string;
+  snapshot_id?: string | null;
   repo_id?: string | null;
   goal: string;
   status: string;
@@ -35,7 +37,8 @@ const statusLabel: Record<string, string> = {
   success: "运行成功",
   completed: "运行成功",
   failed: "运行失败",
-  running: "运行中"
+  running: "运行中",
+  queued: "已排队", partial: "部分完成", cancelled: "已取消"
 };
 
 export default function WorkflowRunsPage() {
@@ -57,12 +60,15 @@ export default function WorkflowRunsPage() {
   useEffect(() => {
     if (!repoId) return;
     setLoading(true);
-    apiGet<WorkflowRun[]>(`/api/chat/workflow-runs?repo_id=${repoId}`)
+    const load = () => apiGet<WorkflowRun[]>(`/api/chat/workflow-runs?repo_id=${repoId}`)
       .then((items) => {
         setRuns(items);
         setSelectedId((current) => (items.some((item) => item.id === current) ? current : items[0]?.id || ""));
       })
       .finally(() => setLoading(false));
+    void load();
+    const timer = setInterval(() => { void load(); }, 5000);
+    return () => clearInterval(timer);
   }, [repoId]);
 
   const selected = useMemo(() => runs.find((item) => item.id === selectedId) ?? runs[0], [runs, selectedId]);
@@ -103,7 +109,7 @@ export default function WorkflowRunsPage() {
         </aside>
 
         <main className="min-w-0">
-          {selected ? (
+          {selected ? (selected.snapshot_id ? <WorkflowRunCard key={selected.id} id={selected.id} /> : (
             <div className="space-y-5">
               <section className="border-b border-line pb-4">
                 <div className="flex flex-wrap items-center gap-2">
@@ -155,7 +161,7 @@ export default function WorkflowRunsPage() {
                 创建于 {selected.created_at ? new Date(selected.created_at).toLocaleString("zh-CN") : "未知"}，完成后写入 workflow 与 task 两级记录。
               </div>
             </div>
-          ) : <div className="text-sm text-slate-500">{loading ? "正在读取工作流记录..." : "请选择一条运行记录。"}</div>}
+          )) : <div className="text-sm text-slate-500">{loading ? "正在读取工作流记录..." : "请选择一条运行记录。"}</div>}
         </main>
       </div>
     </>

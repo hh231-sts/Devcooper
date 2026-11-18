@@ -105,9 +105,9 @@ async def _fetch_snapshot(repo: Repository, payload: RepoSyncRequest) -> tuple[S
             run_id = item.get("id")
             jobs = logs = None
             if run_id:
-                jobs = await fetch("workflow_runs", list_workflow_run_jobs, repo.owner, repo.name, run_id, token=token, base_url=base_url, detail=f"{run_id}/jobs")
+                jobs = await fetch("workflow_runs", list_workflow_run_jobs, repo.owner, repo.name, run_id, token=token, base_url=base_url, run_attempt=item.get("run_attempt"), detail=f"{run_id}/jobs")
                 if item.get("conclusion") == "failure":
-                    logs = await fetch("workflow_runs", get_workflow_run_logs, repo.owner, repo.name, run_id, token=token, base_url=base_url, detail=f"{run_id}/logs")
+                    logs = await fetch("workflow_runs", get_workflow_run_logs, repo.owner, repo.name, run_id, token=token, base_url=base_url, run_attempt=item.get("run_attempt"), detail=f"{run_id}/logs")
             snapshot.workflow_runs.append((item, jobs, logs))
         synced["workflow_runs"] = len(snapshot.workflow_runs)
 
@@ -168,6 +168,9 @@ def _persist_snapshot(engine: Engine, repo_id: UUID, snapshot: SyncSnapshot, res
             pr.author = login_of(item.get("user"))
             pr.base_branch = (item.get("base") or {}).get("ref")
             pr.head_branch = (item.get("head") or {}).get("ref")
+            pr.base_sha = (item.get("base") or {}).get("sha")
+            pr.head_sha = (item.get("head") or {}).get("sha")
+            pr.merge_commit_sha = item.get("merge_commit_sha")
             pr.merged_at = parse_github_datetime(item.get("merged_at"))
             pr.created_at = parse_github_datetime(item.get("created_at"))
             pr.updated_at = parse_github_datetime(item.get("updated_at"))
@@ -207,9 +210,16 @@ def _persist_snapshot(engine: Engine, repo_id: UUID, snapshot: SyncSnapshot, res
                 run = WorkflowRun(repo_id=repo.id, github_run_id=item.get("id"), name=item.get("name") or "workflow")
                 db.add(run)
             run.name = item.get("name") or run.name
+            if run.run_attempt != item.get("run_attempt") or run.commit_sha != item.get("head_sha"):
+                run.jobs = []
+                run.logs_text = None
             run.status = item.get("status") or "unknown"
             run.conclusion = item.get("conclusion")
             run.html_url = item.get("html_url")
+            run.commit_sha = item.get("head_sha")
+            run.pull_requests_json = item.get("pull_requests") or []
+            run.run_attempt = item.get("run_attempt")
+            run.workflow_path = item.get("path")
             run.created_at = parse_github_datetime(item.get("created_at"))
             run.updated_at = parse_github_datetime(item.get("updated_at"))
             if run.github_run_id:

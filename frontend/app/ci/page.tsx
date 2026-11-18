@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Card, GhostButton, PageTitle, PrimaryButton } from "@/components/ui/card";
 import { apiGet, apiPost } from "@/lib/api";
 import type { Repository } from "@/lib/types";
+import { WorkflowRunCard } from "@/components/workflow-run-card";
 
 type WorkflowRun = {
   id: string;
@@ -18,7 +19,10 @@ type WorkflowRun = {
 export default function CIPage() {
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [selected, setSelected] = useState<WorkflowRun | null>(null);
-  const [analysis, setAnalysis] = useState("");
+  const [runId, setRunId] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const selectedId = selected?.id;
 
   useEffect(() => {
     apiGet<Repository[]>("/api/repos").then((repos) => {
@@ -31,10 +35,24 @@ export default function CIPage() {
     });
   }, []);
 
+  useEffect(() => {
+    setRunId("");
+    if (!selectedId) return;
+    let disposed = false;
+    apiGet<{ workflow_run_id: string | null }>(`/api/workflow-runs/${selectedId}/analysis-run`).then((data) => {
+      if (!disposed) setRunId(data.workflow_run_id ?? "");
+    }).catch((reason: Error) => { if (!disposed) setError(reason.message); });
+    return () => { disposed = true; };
+  }, [selectedId]);
+
   async function analyze() {
     if (!selected) return;
-    const data = await apiPost(`/api/workflow-runs/${selected.id}/analyze`, {});
-    setAnalysis(JSON.stringify(data, null, 2));
+    setSubmitting(true); setError("");
+    try {
+      const data = await apiPost<{ workflow_run_id: string }>(`/api/workflow-runs/${selected.id}/analyze`, {});
+      setRunId(data.workflow_run_id);
+    } catch (reason) { setError((reason as Error).message); }
+    finally { setSubmitting(false); }
   }
 
   return (
@@ -78,8 +96,9 @@ export default function CIPage() {
             </div>
           )}
           {selected?.logs_text && <pre className="mt-3 max-h-44 overflow-auto rounded-md border border-line bg-panel p-3 text-xs text-slate-700">{selected.logs_text}</pre>}
-          <PrimaryButton onClick={analyze} disabled={!selected} className="mt-4">分析失败原因</PrimaryButton>
-          {analysis && <pre className="mt-4 max-h-[520px] overflow-auto rounded-md border border-slate-800 bg-slate-950 p-4 text-xs text-slate-100">{analysis}</pre>}
+          <PrimaryButton onClick={analyze} disabled={!selected || submitting} className="mt-4">分析失败原因</PrimaryButton>
+          {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+          {runId && <WorkflowRunCard key={runId} id={runId} />}
         </Card>
       </div>
     </>
